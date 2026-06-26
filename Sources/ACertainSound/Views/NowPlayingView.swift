@@ -1,43 +1,49 @@
 import SwiftUI
 
-/// The broadcast centerpiece: what's playing, what's next, and a large, steady
-/// countdown to the moment the music stops — the host's cue to talk.
+/// The broadcast centerpiece: artwork, what's playing, what's next, and a large,
+/// steady countdown to when the music stops — the host's cue to talk.
 struct NowPlayingView: View {
     @EnvironmentObject var engine: AudioEngine
+    @ObservedObject private var artwork = ArtworkCache.shared
 
     private var isLive: Bool { engine.state == .playing }
 
     var body: some View {
-        HStack(alignment: .center, spacing: 28) {
-            // Left: now playing + up next
-            VStack(alignment: .leading, spacing: 14) {
+        HStack(alignment: .center, spacing: 22) {
+            artworkView
+
+            // Now playing + up next
+            VStack(alignment: .leading, spacing: 10) {
                 HStack(spacing: 8) {
                     Circle()
                         .fill(isLive ? Theme.accent : Theme.textTertiary)
                         .frame(width: 7, height: 7)
-                        .opacity(isLive ? 1 : 0.5)
                     SectionLabel(statusLabel)
                 }
 
                 if let t = engine.currentTrack {
                     Text(t.title)
-                        .font(.system(size: 26, weight: .semibold))
+                        .font(.system(size: 25, weight: .semibold))
                         .foregroundStyle(Theme.textPrimary)
                         .lineLimit(1)
-                    Text(t.artist.isEmpty ? "—" : t.artist)
-                        .font(.system(size: 15))
+                    Text(subtitle(t))
+                        .font(.system(size: 14))
                         .foregroundStyle(Theme.textSecondary)
                         .lineLimit(1)
+                    if !t.note.isEmpty {
+                        Text(t.note)
+                            .font(.system(size: 12))
+                            .foregroundStyle(Theme.textTertiary)
+                            .lineLimit(2)
+                    }
                 } else {
                     Text("Nothing playing")
-                        .font(.system(size: 26, weight: .semibold))
+                        .font(.system(size: 25, weight: .semibold))
                         .foregroundStyle(Theme.textTertiary)
                     Text("Select a group and press Space")
-                        .font(.system(size: 15))
+                        .font(.system(size: 14))
                         .foregroundStyle(Theme.textTertiary)
                 }
-
-                Spacer().frame(height: 4)
 
                 if let next = engine.upNextTrack {
                     HStack(spacing: 6) {
@@ -57,14 +63,13 @@ struct NowPlayingView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            // Right: the big countdown
+            // Countdown
             VStack(alignment: .trailing, spacing: 6) {
-                SectionLabel(engine.isFadingToTalk ? "Fading out" : "Music stops in")
+                SectionLabel(countdownLabel)
                 Text(TimeFmt.clock(engine.groupRemaining))
-                    .font(Theme.mono(64, .light))
+                    .font(Theme.mono(60, .light))
                     .foregroundStyle(countdownColor)
                     .contentTransition(.numericText())
-
                 if engine.currentSegmentDuration > 0 {
                     Text("track \(TimeFmt.clock(engine.currentElapsed)) / \(TimeFmt.clock(engine.currentSegmentDuration))")
                         .font(Theme.mono(12))
@@ -74,7 +79,41 @@ struct NowPlayingView: View {
         }
     }
 
+    @ViewBuilder private var artworkView: some View {
+        let img = engine.currentTrack.flatMap { artwork.image(for: $0.url) }
+        ZStack {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Theme.surfaceHi)
+            if let img {
+                Image(nsImage: img)
+                    .resizable()
+                    .scaledToFill()
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            } else {
+                Image(systemName: "music.note")
+                    .font(.system(size: 26, weight: .light))
+                    .foregroundStyle(Theme.textTertiary)
+            }
+        }
+        .frame(width: 88, height: 88)
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .strokeBorder(Theme.hairline, lineWidth: 1)
+        )
+        .onAppear { if let t = engine.currentTrack { artwork.ensure(t.url) } }
+        .onChange(of: engine.currentTrack?.url) { _, url in if let url { artwork.ensure(url) } }
+    }
+
+    private func subtitle(_ t: Track) -> String {
+        var parts: [String] = []
+        if !t.artist.isEmpty { parts.append(t.artist) }
+        if !t.album.isEmpty { parts.append(t.album) }
+        if let y = t.year { parts.append(String(y)) }
+        return parts.isEmpty ? "—" : parts.joined(separator: "  ·  ")
+    }
+
     private var statusLabel: String {
+        if engine.isDucked || engine.isFadingToTalk { return "Talk · music ducked" }
         switch engine.state {
         case .playing: return engine.isCrossfading ? "Crossfading" : "On air"
         case .paused:  return "Paused"
@@ -82,8 +121,12 @@ struct NowPlayingView: View {
         }
     }
 
+    private var countdownLabel: String {
+        (engine.isDucked || engine.isFadingToTalk) ? "Bed ends in" : "Music stops in"
+    }
+
     private var countdownColor: Color {
-        if engine.isFadingToTalk { return Theme.accent }
+        if engine.isDucked || engine.isFadingToTalk { return Theme.accent }
         if isLive && engine.groupRemaining <= 10 { return Theme.accent }
         return isLive ? Theme.textPrimary : Theme.textTertiary
     }

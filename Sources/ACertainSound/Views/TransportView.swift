@@ -1,30 +1,27 @@
 import SwiftUI
 
-/// Bottom control bar: transport buttons, crossfade + fade-to-talk settings,
-/// and quiet hotkey hints. Designed to be operated by keyboard during a show.
+/// Bottom control bar: transport, fade-to-talk, and the crossfade / voiceover
+/// settings. Designed to be driven by single keys during a show.
 struct TransportView: View {
     @EnvironmentObject var app: AppState
     @EnvironmentObject var engine: AudioEngine
+    @EnvironmentObject var power: PowerManager
+
+    private var ducking: Bool { engine.isDucked || engine.isFadingToTalk }
 
     var body: some View {
         VStack(spacing: 0) {
             if let err = engine.lastError {
-                HStack(spacing: 6) {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                    Text(err).lineLimit(1)
-                }
-                .font(.system(size: 11))
-                .foregroundStyle(Theme.accent)
-                .padding(.horizontal, 24)
-                .padding(.vertical, 6)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Theme.accentSoft)
+                banner(err, icon: "exclamationmark.triangle.fill")
+            }
+            if power.isLow {
+                banner("Battery low (\(power.batteryPercent ?? 0)%) — plug in before the show drops out",
+                       icon: "battery.25")
             }
 
             HStack(spacing: 18) {
-                // Transport cluster
                 HStack(spacing: 14) {
-                    TransportButton(system: "stop.fill", hint: "⌘.") { app.stop() }
+                    TransportButton(system: "stop.fill", hint: ".") { app.stop() }
                         .disabled(engine.state == .stopped)
 
                     Button { app.playPause() } label: {
@@ -37,45 +34,45 @@ struct TransportView: View {
                     .buttonStyle(.plain)
                     .help("Play / Pause  (Space)")
 
-                    TransportButton(system: "forward.fill", hint: "⌘→") { app.skipSong() }
+                    TransportButton(system: "forward.fill", hint: "S") { app.skipSong() }
                         .disabled(engine.state == .stopped)
 
-                    TransportButton(system: "forward.end.fill", hint: "⌘↩") { app.playNextGroup() }
+                    TransportButton(system: "forward.end.fill", hint: "N") { app.playNextGroup() }
                 }
 
                 Divider().frame(height: 32).overlay(Theme.hairline)
 
-                // Fade to talk
                 Button { app.fadeToTalk() } label: {
                     HStack(spacing: 7) {
                         Image(systemName: "mic.fill").font(.system(size: 12))
-                        Text("Fade to Talk").font(.system(size: 12, weight: .medium))
+                        Text(ducking ? "Music Up" : "Fade to Talk")
+                            .font(.system(size: 12, weight: .medium))
                     }
-                    .foregroundStyle(engine.isFadingToTalk ? Theme.background : Theme.textPrimary)
+                    .foregroundStyle(ducking ? Theme.background : Theme.textPrimary)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 9)
-                    .background(engine.isFadingToTalk ? Theme.accent : Theme.surfaceHi,
-                                in: Capsule())
+                    .background(ducking ? Theme.accent : Theme.surfaceHi, in: Capsule())
                 }
                 .buttonStyle(.plain)
                 .disabled(engine.state != .playing)
-                .help("Slowly fade the current song out so you can talk over it  (⌘⇧F)")
+                .help("Duck the music under your voice, hold it there, then press again to bring it back  (F)")
 
                 Spacer()
 
-                // Settings
-                HStack(spacing: 22) {
+                HStack(spacing: 20) {
                     SettingSlider(label: "Crossfade",
-                                  value: $app.show.crossfadeDuration,
-                                  range: 0...12,
-                                  display: app.show.crossfadeDuration == 0
-                                      ? "off" : "\(Int(app.show.crossfadeDuration))s") {
+                                  value: $app.show.crossfadeDuration, range: 0...12,
+                                  display: app.show.crossfadeDuration == 0 ? "off" : "\(Int(app.show.crossfadeDuration))s") {
                         app.saveShow()
                     }
-                    SettingSlider(label: "Fade to talk",
-                                  value: $app.show.fadeToTalkDuration,
-                                  range: 5...90,
+                    SettingSlider(label: "Duck time",
+                                  value: $app.show.fadeToTalkDuration, range: 3...60,
                                   display: "\(Int(app.show.fadeToTalkDuration))s") {
+                        app.saveShow()
+                    }
+                    SettingSlider(label: "Bed level",
+                                  value: bedLevelBinding, range: 10...90,
+                                  display: "\(Int(app.show.duckLevel * 100))%") {
                         app.saveShow()
                     }
                 }
@@ -84,6 +81,24 @@ struct TransportView: View {
             .padding(.vertical, 14)
         }
         .background(Theme.surface)
+    }
+
+    private var bedLevelBinding: Binding<Double> {
+        Binding(get: { app.show.duckLevel * 100 },
+                set: { app.show.duckLevel = $0 / 100 })
+    }
+
+    private func banner(_ text: String, icon: String) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: icon)
+            Text(text).lineLimit(1)
+        }
+        .font(.system(size: 11, weight: .medium))
+        .foregroundStyle(Theme.accent)
+        .padding(.horizontal, 24)
+        .padding(.vertical, 6)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.accentSoft)
     }
 }
 
@@ -123,9 +138,7 @@ private struct SettingSlider: View {
             HStack {
                 SectionLabel(label)
                 Spacer()
-                Text(display)
-                    .font(Theme.mono(11))
-                    .foregroundStyle(Theme.accent)
+                Text(display).font(Theme.mono(11)).foregroundStyle(Theme.accent)
             }
             Slider(value: $value, in: range, step: 1) { editing in
                 if !editing { onCommit() }
@@ -133,6 +146,6 @@ private struct SettingSlider: View {
             .controlSize(.small)
             .tint(Theme.accent)
         }
-        .frame(width: 130)
+        .frame(width: 120)
     }
 }

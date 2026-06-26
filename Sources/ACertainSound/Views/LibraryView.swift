@@ -122,6 +122,7 @@ private struct LibraryRow: View {
         .background(hovering ? Theme.surface : Color.clear,
                     in: RoundedRectangle(cornerRadius: 8, style: .continuous))
         .onHover { hovering = $0 }
+        .draggable(DragPayload(trackID: track.id, fromGroupID: nil))
         .contextMenu {
             ForEach(app.show.groups) { g in
                 Button("Add to \(g.name)") { app.addToGroup(track, groupID: g.id) }

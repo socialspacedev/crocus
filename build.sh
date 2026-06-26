@@ -11,7 +11,7 @@ cd "$(dirname "$0")"
 
 CONFIG="${1:-debug}"
 LAUNCH="${2:-launch}"
-APP_NAME="A Certain Sound"
+APP_NAME="Crocus"
 APP="dist/${APP_NAME}.app"
 
 echo "▶ Building ($CONFIG)…"

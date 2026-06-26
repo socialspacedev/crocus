@@ -1,25 +1,25 @@
 import SwiftUI
 
-/// Minimal, elegant broadcast-console palette: warm near-black surfaces,
-/// restrained off-white type, hairline separators, and a single amber accent
-/// reserved for the live / now-playing state.
+/// Minimal, elegant broadcast-console palette: near-black green-tinted surfaces,
+/// a restrained monochrome-green type scale, hairline separators, and a single
+/// brighter green accent reserved for the live / now-playing state.
 enum Theme {
-    // Surfaces
-    static let background = Color(red: 0.055, green: 0.055, blue: 0.063)   // #0E0E10
-    static let surface    = Color(red: 0.094, green: 0.094, blue: 0.105)   // #18181B
-    static let surfaceHi  = Color(red: 0.137, green: 0.137, blue: 0.149)   // #232326
+    // Surfaces — a whisper of green keeps the whole console monochrome-green.
+    static let background = Color(red: 0.043, green: 0.055, blue: 0.047)   // #0B0E0C
+    static let surface    = Color(red: 0.075, green: 0.090, blue: 0.078)   // #131713
+    static let surfaceHi  = Color(red: 0.110, green: 0.130, blue: 0.114)   // #1C211D
 
-    // Text
-    static let textPrimary   = Color(white: 0.93)
-    static let textSecondary = Color(white: 0.58)
-    static let textTertiary  = Color(white: 0.40)
+    // Text — green-tinted greys for a cohesive monochrome-green feel.
+    static let textPrimary   = Color(red: 0.88, green: 0.93, blue: 0.88)
+    static let textSecondary = Color(red: 0.56, green: 0.63, blue: 0.57)
+    static let textTertiary  = Color(red: 0.38, green: 0.44, blue: 0.39)
 
-    // Single accent — warm amber, used sparingly for "live".
-    static let accent     = Color(red: 0.88, green: 0.64, blue: 0.34)       // #E0A356
-    static let accentSoft = Color(red: 0.88, green: 0.64, blue: 0.34).opacity(0.14)
+    // Single accent — a clean signal green, used sparingly for "live".
+    static let accent     = Color(red: 0.40, green: 0.80, blue: 0.52)       // #66CC85
+    static let accentSoft = Color(red: 0.40, green: 0.80, blue: 0.52).opacity(0.14)
 
-    // Hairlines
-    static let hairline = Color.white.opacity(0.07)
+    // Hairlines — faintly green.
+    static let hairline = Color(red: 0.55, green: 0.95, blue: 0.65).opacity(0.07)
 
     // Fonts
     static func mono(_ size: CGFloat, _ weight: Font.Weight = .regular) -> Font {

@@ -3,13 +3,13 @@
 <plist version="1.0">
 <dict>
     <key>CFBundleName</key>
-    <string>A Certain Sound</string>
+    <string>Crocus</string>
     <key>CFBundleDisplayName</key>
-    <string>A Certain Sound</string>
+    <string>Crocus</string>
     <key>CFBundleIdentifier</key>
-    <string>com.andrewlong.acertainsound</string>
+    <string>com.andrewlong.crocus</string>
     <key>CFBundleExecutable</key>
-    <string>A Certain Sound</string>
+    <string>Crocus</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
@@ -24,5 +24,18 @@
     <true/>
     <key>NSPrincipalClass</key>
     <string>NSApplication</string>
+    <key>UTExportedTypeDeclarations</key>
+    <array>
+        <dict>
+            <key>UTTypeIdentifier</key>
+            <string>com.andrewlong.crocus.track</string>
+            <key>UTTypeDescription</key>
+            <string>Crocus Track</string>
+            <key>UTTypeConformsTo</key>
+            <array>
+                <string>public.data</string>
+            </array>
+        </dict>
+    </array>
 </dict>
 </plist>

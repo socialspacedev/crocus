@@ -1,7 +1,7 @@
 import SwiftUI
 
-/// The show's running order: a list of groups, each a short run of songs that
-/// crossfade then stop. This is where the host builds and triggers the show.
+/// The show's running order: numbered groups, each a short run of songs that
+/// crossfade then stop. Drag to reorder or to add songs from the library.
 struct RundownView: View {
     @EnvironmentObject var app: AppState
 
@@ -29,8 +29,8 @@ struct RundownView: View {
             } else {
                 ScrollView {
                     VStack(spacing: 12) {
-                        ForEach(app.show.groups) { group in
-                            GroupCard(group: group)
+                        ForEach(Array(app.show.groups.enumerated()), id: \.element.id) { idx, group in
+                            GroupCard(group: group, number: idx + 1)
                         }
                     }
                     .padding(.horizontal, 18)
@@ -69,31 +69,27 @@ private struct GroupCard: View {
     @EnvironmentObject var app: AppState
     @EnvironmentObject var engine: AudioEngine
     let group: SongGroup
+    let number: Int
+
+    @State private var dropTargeted = false
 
     private var isSelected: Bool { app.selectedGroupID == group.id }
-    private var isPlayingThis: Bool {
-        engine.state != .stopped && isSelected
-    }
+    private var isPlayingThis: Bool { engine.state != .stopped && isSelected }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // Header
             HStack(spacing: 10) {
-                Button {
-                    app.playGroup(group)
-                } label: {
+                Button { app.playGroup(group) } label: {
                     Image(systemName: isPlayingThis ? "waveform" : "play.fill")
                         .font(.system(size: 12, weight: .bold))
                         .foregroundStyle(isPlayingThis ? Theme.accent : Theme.textPrimary)
                         .frame(width: 26, height: 26)
-                        .background(isPlayingThis ? Theme.accentSoft : Theme.surfaceHi,
-                                    in: Circle())
+                        .background(isPlayingThis ? Theme.accentSoft : Theme.surfaceHi, in: Circle())
                 }
                 .buttonStyle(.plain)
                 .help("Play this group")
 
-                TextField("Group name", text: bindingName)
-                    .textFieldStyle(.plain)
+                Text("Group \(number)")
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(Theme.textPrimary)
 
@@ -116,7 +112,13 @@ private struct GroupCard: View {
             }
             .padding(12)
 
-            if !group.tracks.isEmpty {
+            if group.tracks.isEmpty {
+                Text("Drag songs here")
+                    .font(.system(size: 12))
+                    .foregroundStyle(Theme.textTertiary)
+                    .frame(maxWidth: .infinity)
+                    .padding(.bottom, 14)
+            } else {
                 Divider().overlay(Theme.hairline)
                 VStack(spacing: 0) {
                     ForEach(Array(group.tracks.enumerated()), id: \.element.id) { idx, track in
@@ -132,46 +134,47 @@ private struct GroupCard: View {
         .cardSurface(isSelected ? Theme.surfaceHi : Theme.surface)
         .overlay(
             RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .strokeBorder(isSelected ? Theme.accent.opacity(0.5) : Color.clear, lineWidth: 1)
+                .strokeBorder(dropTargeted ? Theme.accent
+                              : (isSelected ? Theme.accent.opacity(0.5) : Color.clear),
+                              lineWidth: 1)
         )
         .contentShape(Rectangle())
         .onTapGesture { app.selectedGroupID = group.id }
-    }
-
-    private var bindingName: Binding<String> {
-        Binding(
-            get: { group.name },
-            set: { newValue in
-                if let i = app.show.groups.firstIndex(where: { $0.id == group.id }) {
-                    app.show.groups[i].name = newValue
-                    app.saveShow()
-                }
-            }
-        )
+        .dropDestination(for: DragPayload.self) { items, _ in
+            for p in items { app.handleDrop(p, intoGroup: group.id, at: nil) }
+            return !items.isEmpty
+        } isTargeted: { dropTargeted = $0 }
     }
 }
 
 private struct TrackRow: View {
     @EnvironmentObject var app: AppState
+    @ObservedObject private var artwork = ArtworkCache.shared
     let group: SongGroup
     let track: Track
     let position: Int
     let isCurrent: Bool
-    @State private var showTrim = false
+    @State private var showNote = false
+
+    private var isFocused: Bool {
+        app.focusedRef == TrackRef(groupID: group.id, trackID: track.id)
+    }
 
     var body: some View {
         HStack(spacing: 10) {
             Text("\(position)")
                 .font(Theme.mono(11))
                 .foregroundStyle(isCurrent ? Theme.accent : Theme.textTertiary)
-                .frame(width: 16, alignment: .trailing)
+                .frame(width: 14, alignment: .trailing)
+
+            artworkThumb
 
             VStack(alignment: .leading, spacing: 1) {
                 Text(track.title)
                     .font(.system(size: 13, weight: isCurrent ? .semibold : .regular))
                     .foregroundStyle(isCurrent ? Theme.accent : Theme.textPrimary)
                     .lineLimit(1)
-                Text(track.artist.isEmpty ? "—" : track.artist)
+                Text(subtitle)
                     .font(.system(size: 11))
                     .foregroundStyle(Theme.textTertiary)
                     .lineLimit(1)
@@ -190,15 +193,15 @@ private struct TrackRow: View {
                 .font(Theme.mono(11))
                 .foregroundStyle(Theme.textTertiary)
 
-            Button { showTrim.toggle() } label: {
-                Image(systemName: "slider.horizontal.3")
+            Button { showNote.toggle() } label: {
+                Image(systemName: track.note.isEmpty ? "text.bubble" : "text.bubble.fill")
                     .font(.system(size: 12))
-                    .foregroundStyle(Theme.textTertiary)
+                    .foregroundStyle(track.note.isEmpty ? Theme.textTertiary : Theme.accent)
             }
             .buttonStyle(.plain)
-            .help("Trim start / end")
-            .popover(isPresented: $showTrim, arrowEdge: .trailing) {
-                TrimEditor(group: group, track: track)
+            .help("Note (shows on the website export)")
+            .popover(isPresented: $showNote, arrowEdge: .trailing) {
+                NoteEditor(group: group, track: track)
             }
 
             Button {
@@ -215,65 +218,67 @@ private struct TrackRow: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .background(isCurrent ? Theme.accentSoft : Color.clear)
+        .background(isCurrent ? Theme.accentSoft : (isFocused ? Theme.surfaceHi.opacity(0.6) : Color.clear))
+        .contentShape(Rectangle())
+        .onTapGesture {
+            app.selectedGroupID = group.id
+            app.focus(TrackRef(groupID: group.id, trackID: track.id))
+        }
+        .draggable(DragPayload(trackID: track.id, fromGroupID: group.id))
+        .dropDestination(for: DragPayload.self) { items, _ in
+            for p in items { app.handleDrop(p, intoGroup: group.id, at: position - 1) }
+            return !items.isEmpty
+        }
+    }
+
+    @ViewBuilder private var artworkThumb: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 4, style: .continuous).fill(Theme.surfaceHi)
+            if let img = artwork.image(for: track.url) {
+                Image(nsImage: img).resizable().scaledToFill()
+                    .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+            } else {
+                Image(systemName: "music.note")
+                    .font(.system(size: 9))
+                    .foregroundStyle(Theme.textTertiary)
+            }
+        }
+        .frame(width: 26, height: 26)
+        .onAppear { artwork.ensure(track.url) }
+    }
+
+    private var subtitle: String {
+        var parts: [String] = []
+        if !track.artist.isEmpty { parts.append(track.artist) }
+        if let y = track.year { parts.append(String(y)) }
+        return parts.isEmpty ? "—" : parts.joined(separator: " · ")
     }
 }
 
-/// Set per-song start / end points to skip long intros or outros.
-private struct TrimEditor: View {
+/// Per-song note — feeds the website's `tracks[].note` and the exports.
+private struct NoteEditor: View {
     @EnvironmentObject var app: AppState
     let group: SongGroup
     let track: Track
-
-    @State private var start: Double = 0
-    @State private var end: Double = 0
-    @State private var trimEndOn = false
+    @State private var text = ""
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            SectionLabel("Trim · \(track.title)")
-
-            HStack {
-                Text("Start").font(.system(size: 12)).frame(width: 40, alignment: .leading)
-                Stepper(value: $start, in: 0...max(0, track.duration - 1), step: 1) {
-                    Text(TimeFmt.clock(start)).font(Theme.mono(13))
+        VStack(alignment: .leading, spacing: 8) {
+            SectionLabel("Note · \(track.title)")
+            TextEditor(text: $text)
+                .font(.system(size: 13))
+                .frame(width: 280, height: 90)
+                .scrollContentBackground(.hidden)
+                .padding(6)
+                .cardSurface(Theme.surface)
+                .onChange(of: text) { _, new in
+                    app.updateNote(groupID: group.id, trackID: track.id, note: new)
                 }
-                .onChange(of: start) { _, _ in commit() }
-            }
-
-            Toggle(isOn: $trimEndOn) {
-                Text("Custom end").font(.system(size: 12))
-            }
-            .toggleStyle(.switch)
-            .onChange(of: trimEndOn) { _, on in
-                if on, end <= start { end = track.duration }
-                commit()
-            }
-
-            if trimEndOn {
-                HStack {
-                    Text("End").font(.system(size: 12)).frame(width: 40, alignment: .leading)
-                    Stepper(value: $end, in: (start + 1)...max(start + 1, track.duration), step: 1) {
-                        Text(TimeFmt.clock(end)).font(Theme.mono(13))
-                    }
-                    .onChange(of: end) { _, _ in commit() }
-                }
-            }
-
-            Text("Plays \(TimeFmt.clock((trimEndOn ? end : track.duration) - start)) of \(TimeFmt.clock(track.duration))")
-                .font(.system(size: 11))
+            Text("e.g. “Recorded in one take at Abbey Road, 1969.”")
+                .font(.system(size: 10))
                 .foregroundStyle(Theme.textTertiary)
         }
-        .padding(16)
-        .frame(width: 260)
-        .onAppear {
-            start = track.trimStart
-            if let e = track.trimEnd { end = e; trimEndOn = true } else { end = track.duration }
-        }
-    }
-
-    private func commit() {
-        app.updateTrim(groupID: group.id, trackID: track.id,
-                       start: start, end: trimEndOn ? end : nil)
+        .padding(14)
+        .onAppear { text = track.note }
     }
 }

@@ -9,32 +9,40 @@ struct ACertainSoundApp: App {
             RootView()
                 .environmentObject(app)
                 .environmentObject(app.engine)
-                .frame(minWidth: 920, minHeight: 600)
+                .environmentObject(app.power)
+                .frame(minWidth: 960, minHeight: 640)
                 .preferredColorScheme(.dark)
         }
-        .defaultSize(width: 1080, height: 720)
+        .defaultSize(width: 1120, height: 760)
         .commands {
-            // Replace the default "New" with "New Show".
             CommandGroup(replacing: .newItem) {
                 Button("New Show") { app.newShow() }
                     .keyboardShortcut("n", modifiers: .command)
                 Button("Import Music…") { app.requestImport() }
                     .keyboardShortcut("o", modifiers: .command)
+                Divider()
+                Button("Previous Shows…") { app.showArchive = true }
+                Menu("Export") {
+                    Button("Copy as Spreadsheet Rows") { app.copySpreadsheet() }
+                    Button("Export Markdown…") { app.exportMarkdown() }
+                    Button("Export CSV…") { app.exportCSV() }
+                }
             }
 
-            // Playback menu — these double as the show hotkeys.
+            // Playback menu — clickable mirrors of the single-key controls. No key
+            // equivalents here; the keyboard monitor owns the keys so they don't
+            // fire while you're typing in a text field.
             CommandMenu("Playback") {
                 Button(app.engine.state == .playing ? "Pause" : "Play") { app.playPause() }
-                    .keyboardShortcut(.space, modifiers: [])
                 Button("Skip Song") { app.skipSong() }
-                    .keyboardShortcut(.rightArrow, modifiers: .command)
                 Button("Play Next Group") { app.playNextGroup() }
-                    .keyboardShortcut(.return, modifiers: .command)
                 Divider()
-                Button("Fade to Talk") { app.fadeToTalk() }
-                    .keyboardShortcut("f", modifiers: [.command, .shift])
+                Button("Fade to Talk / Music Up") { app.fadeToTalk() }
                 Button("Stop") { app.stop() }
-                    .keyboardShortcut(".", modifiers: .command)
+            }
+
+            CommandGroup(replacing: .help) {
+                Button("Keyboard Shortcuts") { app.showShortcuts = true }
             }
         }
     }

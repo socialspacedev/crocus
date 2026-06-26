@@ -18,7 +18,10 @@ final class AudioEngine: ObservableObject {
     @Published private(set) var currentSegmentDuration: TimeInterval = 0
     @Published private(set) var groupRemaining: TimeInterval = 0
     @Published private(set) var isCrossfading = false
+    /// Currently ramping the music down (or back up) for a voiceover.
     @Published private(set) var isFadingToTalk = false
+    /// Holding at the bed level under a voiceover.
+    @Published private(set) var isDucked = false
     /// Surfaced to the UI if a file fails to load mid-show, without crashing.
     @Published private(set) var lastError: String?
 
@@ -29,7 +32,8 @@ final class AudioEngine: ObservableObject {
     private var queue: [Track] = []
     private var index = 0
     private var crossfadeDuration: TimeInterval = 3
-    private var fadeToTalkDuration: TimeInterval = 45
+    private var fadeToTalkDuration: TimeInterval = 10
+    private var duckLevel: Float = 0.45
 
     private var activeIsA = true
     private var activeDeck: AVAudioPlayerNode { activeIsA ? deckA : deckB }
@@ -42,6 +46,8 @@ final class AudioEngine: ObservableObject {
     private var crossfadeStartElapsed: TimeInterval?
     private var fadeStart: Date?
     private var fadeFromVolume: Float = 1
+    private var fadeTarget: Float = 1
+    private var fadeRampDuration: TimeInterval = 10
 
     init() {
         engine.attach(deckA)
@@ -54,12 +60,14 @@ final class AudioEngine: ObservableObject {
 
     // MARK: - Public transport
 
-    func playGroup(_ tracks: [Track], crossfade: TimeInterval, fadeToTalk: TimeInterval) {
+    func playGroup(_ tracks: [Track], crossfade: TimeInterval,
+                   fadeToTalk: TimeInterval, duckLevel: Float) {
         stop()
         queue = tracks
         index = 0
         crossfadeDuration = max(0, crossfade)
         fadeToTalkDuration = max(1, fadeToTalk)
+        self.duckLevel = min(0.95, max(0.05, duckLevel))
         guard !queue.isEmpty else { return }
 
         ensureRunning()
@@ -106,18 +114,37 @@ final class AudioEngine: ObservableObject {
         }
     }
 
-    /// Slow fade-out so the host can talk over a long outro, then silence.
+    /// Toggle "fade to talk": duck the music down to a bed level and hold it there
+    /// so you can talk over the song; press again to bring it back up. The duck
+    /// time is clamped so it never runs past the end of the current song.
     func startFadeToTalk() {
-        guard state == .playing, !isFadingToTalk else { return }
-        isFadingToTalk = true
-        fadeStart = Date()
-        fadeFromVolume = activeDeck.volume
+        guard state == .playing else { return }
+
+        if isDucked || isFadingToTalk {
+            // Bring the music back up.
+            beginVolumeRamp(to: 1.0, over: 2)
+            return
+        }
+
+        // Duck down — but never slower than the song has left to play.
+        let remaining = max(0, activeSegmentDuration - currentElapsed)
+        let dur = min(fadeToTalkDuration, max(1, remaining - 0.3))
         if isCrossfading {
             idleDeck.stop()
             idleDeck.volume = 0
             isCrossfading = false
             crossfadeStartElapsed = nil
         }
+        beginVolumeRamp(to: duckLevel, over: dur)
+    }
+
+    private func beginVolumeRamp(to target: Float, over duration: TimeInterval) {
+        fadeFromVolume = activeDeck.volume
+        fadeTarget = target
+        fadeRampDuration = max(0.2, duration)
+        fadeStart = Date()
+        isFadingToTalk = true
+        isDucked = false
     }
 
     func stop() {
@@ -135,8 +162,10 @@ final class AudioEngine: ObservableObject {
         groupRemaining = 0
         isCrossfading = false
         isFadingToTalk = false
+        isDucked = false
         crossfadeStartElapsed = nil
         fadeStart = nil
+        fadeTarget = 1
         queue = []
         index = 0
     }
@@ -201,20 +230,24 @@ final class AudioEngine: ObservableObject {
         let e = elapsed(activeDeck)
         currentElapsed = e
         currentSegmentDuration = activeSegmentDuration
-
-        if isFadingToTalk, let fs = fadeStart {
-            let ft = Date().timeIntervalSince(fs)
-            let p = min(1, ft / fadeToTalkDuration)
-            activeDeck.volume = fadeFromVolume * Float(1 - p)
-            groupRemaining = max(0, fadeToTalkDuration - ft)
-            if p >= 1 { stop() }
-            return
-        }
-
         groupRemaining = computeGroupRemaining(currentElapsed: e)
+
+        // Fade-to-talk volume ramp (duck down or restore) runs as an overlay,
+        // so the song keeps playing and the countdown keeps ticking.
+        if isFadingToTalk, let fs = fadeStart {
+            let p = min(1, Date().timeIntervalSince(fs) / fadeRampDuration)
+            activeDeck.volume = fadeFromVolume + (fadeTarget - fadeFromVolume) * Float(p)
+            if p >= 1 {
+                isFadingToTalk = false
+                isDucked = fadeTarget < 0.99
+                fadeStart = nil
+            }
+        }
 
         let remaining = activeSegmentDuration - e
         let hasNext = index + 1 < queue.count
+        // While ducked/voiceover, don't auto-crossfade into the next song.
+        let suppressCrossfade = isFadingToTalk || isDucked
 
         if isCrossfading {
             guard let cs = crossfadeStartElapsed else { return }
@@ -222,11 +255,19 @@ final class AudioEngine: ObservableObject {
             activeDeck.volume = Float(cos(p * .pi / 2))   // equal-power out
             idleDeck.volume = Float(sin(p * .pi / 2))     // equal-power in
             if p >= 1 { completeCrossfade() }
-        } else if hasNext, crossfadeDuration > 0, remaining <= crossfadeDuration {
+        } else if hasNext, crossfadeDuration > 0, remaining <= crossfadeDuration, !suppressCrossfade {
             beginCrossfade()
         } else if remaining <= 0 {
             if hasNext { hardAdvance() } else { stop() }
         }
+    }
+
+    /// Reset any voiceover ducking back to full volume (on song change/stop).
+    private func clearDuck() {
+        isFadingToTalk = false
+        isDucked = false
+        fadeStart = nil
+        fadeTarget = 1
     }
 
     private func beginCrossfade() {
@@ -241,6 +282,7 @@ final class AudioEngine: ObservableObject {
     }
 
     private func completeCrossfade() {
+        clearDuck()
         activeDeck.stop()
         activeDeck.volume = 1
         idleDeck.volume = 1
@@ -256,6 +298,7 @@ final class AudioEngine: ObservableObject {
     private func hardAdvance() {
         let nextIndex = index + 1
         guard nextIndex < queue.count else { stop(); return }
+        clearDuck()
         activeDeck.stop()
         activeDeck.volume = 1
         guard let dur = loadSegment(queue[nextIndex], on: activeDeck) else { stop(); return }
