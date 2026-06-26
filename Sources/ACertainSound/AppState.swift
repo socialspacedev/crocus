@@ -61,6 +61,7 @@ final class AppState: ObservableObject {
     // MARK: - Transport (wired to hotkeys/commands)
 
     func playPause() {
+        resignTextFocus()   // so subsequent single-key shortcuts work
         if engine.state == .stopped {
             playSelectedGroup()
         } else {
@@ -72,7 +73,7 @@ final class AppState: ObservableObject {
         guard let g = selectedGroup, !g.tracks.isEmpty else { return }
         engine.playGroup(g.tracks,
                          crossfade: show.crossfadeDuration,
-                         fadeToTalk: show.fadeToTalkDuration,
+                         fadeToTalk: show.duckTime,
                          duckLevel: Float(show.duckLevel))
     }
 
@@ -95,6 +96,9 @@ final class AppState: ObservableObject {
     func skipSong() { engine.skipSong() }
     func fadeToTalk() { engine.startFadeToTalk() }
     func requestImport() { showImporter = true }
+
+    /// Release any focused text field so single-key shortcuts work again.
+    func resignTextFocus() { NSApp.keyWindow?.makeFirstResponder(nil) }
 
     // MARK: - Library
 
@@ -122,6 +126,19 @@ final class AppState: ObservableObject {
 
     func removeFromLibrary(_ track: Track) {
         library.removeAll { $0.id == track.id }
+        saveLibrary()
+    }
+
+    /// Reorder the library by dropping one song before another.
+    func reorderLibrary(_ payload: DragPayload, before targetID: Track.ID) {
+        guard payload.fromGroupID == nil, payload.trackID != targetID,
+              let from = library.firstIndex(where: { $0.id == payload.trackID }) else { return }
+        let moved = library.remove(at: from)
+        if let to = library.firstIndex(where: { $0.id == targetID }) {
+            library.insert(moved, at: to)
+        } else {
+            library.append(moved)
+        }
         saveLibrary()
     }
 

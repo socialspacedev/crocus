@@ -15,6 +15,8 @@ struct RootView: View {
 
                 VStack(spacing: 14) {
                     NowPlayingView()
+                        .contentShape(Rectangle())
+                        .onTapGesture { app.resignTextFocus() }
                     WaveformView()
                 }
                 .padding(.horizontal, 24)
@@ -62,7 +64,7 @@ struct ShowHeaderView: View {
                         .font(.system(size: 30, weight: .semibold))
                         .foregroundStyle(Theme.textPrimary)
                         .fixedSize()
-                        .onSubmit { app.saveShow() }
+                        .onSubmit { app.saveShow(); app.resignTextFocus() }
 
                     HStack(spacing: 2) {
                         Text("#").foregroundStyle(Theme.textTertiary)
@@ -70,6 +72,7 @@ struct ShowHeaderView: View {
                             .textFieldStyle(.plain)
                             .frame(width: 46)
                             .foregroundStyle(Theme.accent)
+                            .onSubmit { app.saveShow(); app.resignTextFocus() }
                     }
                     .font(.system(size: 30, weight: .semibold))
                 }
@@ -93,7 +96,7 @@ struct ShowHeaderView: View {
                             .font(.system(size: 16))
                             .foregroundStyle(Theme.accent)
                             .frame(maxWidth: 240)
-                            .onSubmit { app.saveShow() }
+                            .onSubmit { app.saveShow(); app.resignTextFocus() }
                     }
                 }
             }

@@ -25,6 +25,7 @@ rm -rf "$APP"
 mkdir -p "${APP}/Contents/MacOS" "${APP}/Contents/Resources"
 cp "$BIN" "${APP}/Contents/MacOS/${APP_NAME}"
 cp Info.plist "${APP}/Contents/Info.plist"
+[ -f AppIcon.icns ] && cp AppIcon.icns "${APP}/Contents/Resources/AppIcon.icns"
 
 # Ad-hoc sign so macOS remembers granted permissions across rebuilds.
 codesign --force --sign - "$APP" >/dev/null 2>&1 || true

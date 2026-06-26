@@ -51,7 +51,8 @@ struct Show: Codable, Identifiable {
 
     // Playback settings, saved with the show.
     var crossfadeDuration: TimeInterval = 3
-    var fadeToTalkDuration: TimeInterval = 10
+    /// How long to take ducking the music down under a voiceover.
+    var duckTime: TimeInterval = 8
     /// Level the music sits at under a voiceover (0–1). ~0.45 = clearly audible bed.
     var duckLevel: Double = 0.45
 
@@ -102,7 +103,7 @@ extension SongGroup {
 
 extension Show {
     enum CodingKeys: String, CodingKey {
-        case id, name, number, date, theme, groups, crossfadeDuration, fadeToTalkDuration, duckLevel
+        case id, name, number, date, theme, groups, crossfadeDuration, duckTime, duckLevel
     }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -113,7 +114,7 @@ extension Show {
         theme = try c.decodeIfPresent(String.self, forKey: .theme) ?? ""
         groups = try c.decodeIfPresent([SongGroup].self, forKey: .groups) ?? []
         crossfadeDuration = try c.decodeIfPresent(TimeInterval.self, forKey: .crossfadeDuration) ?? 3
-        fadeToTalkDuration = try c.decodeIfPresent(TimeInterval.self, forKey: .fadeToTalkDuration) ?? 10
+        duckTime = try c.decodeIfPresent(TimeInterval.self, forKey: .duckTime) ?? 8
         duckLevel = try c.decodeIfPresent(Double.self, forKey: .duckLevel) ?? 0.45
     }
 }

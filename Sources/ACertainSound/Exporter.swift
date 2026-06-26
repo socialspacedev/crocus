@@ -22,7 +22,8 @@ enum Exporter {
     static func csv(_ show: Show) -> String { table(show, sep: ",", quote: true) }
 
     private static func table(_ show: Show, sep: String, quote: Bool) -> String {
-        let headers = ["Group", "#", "Artist", "Title", "Album", "Year", "Note", "Duration"]
+        // Station spreadsheet only needs: date, theme, track #, artist, song.
+        let headers = ["Date", "Theme", "#", "Artist", "Song"]
         func cell(_ s: String) -> String {
             guard quote else { return s.replacingOccurrences(of: "\t", with: " ") }
             if s.contains(",") || s.contains("\"") || s.contains("\n") {
@@ -31,12 +32,9 @@ enum Exporter {
             return s
         }
         var lines = [headers.joined(separator: sep)]
-        for row in flatTracks(show) {
+        for (i, row) in flatTracks(show).enumerated() {
             let t = row.track
-            let cols = [
-                "\(row.group)", "\(row.pos)", t.artist, t.title, t.album,
-                t.year.map(String.init) ?? "", t.note, TimeFmt.clock(t.effectiveDuration)
-            ]
+            let cols = [show.formattedDate, show.theme, "\(i + 1)", t.artist, t.title]
             lines.append(cols.map(cell).joined(separator: sep))
         }
         return lines.joined(separator: "\n")

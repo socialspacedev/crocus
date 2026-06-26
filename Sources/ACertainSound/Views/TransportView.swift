@@ -66,8 +66,8 @@ struct TransportView: View {
                         app.saveShow()
                     }
                     SettingSlider(label: "Duck time",
-                                  value: $app.show.fadeToTalkDuration, range: 3...60,
-                                  display: "\(Int(app.show.fadeToTalkDuration))s") {
+                                  value: $app.show.duckTime, range: 2...30,
+                                  display: "\(Int(app.show.duckTime))s") {
                         app.saveShow()
                     }
                     SettingSlider(label: "Bed level",

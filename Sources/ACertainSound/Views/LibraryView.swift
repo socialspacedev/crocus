@@ -123,6 +123,13 @@ private struct LibraryRow: View {
                     in: RoundedRectangle(cornerRadius: 8, style: .continuous))
         .onHover { hovering = $0 }
         .draggable(DragPayload(trackID: track.id, fromGroupID: nil))
+        .dropDestination(for: DragPayload.self) { items, _ in
+            var handled = false
+            for p in items where p.fromGroupID == nil {
+                app.reorderLibrary(p, before: track.id); handled = true
+            }
+            return handled
+        }
         .contextMenu {
             ForEach(app.show.groups) { g in
                 Button("Add to \(g.name)") { app.addToGroup(track, groupID: g.id) }

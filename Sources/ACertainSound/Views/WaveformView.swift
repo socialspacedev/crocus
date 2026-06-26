@@ -45,7 +45,7 @@ struct WaveformView: View {
             let posX = CGFloat(min(1, max(0, posTime / dur))) * W
 
             ZStack(alignment: .topLeading) {
-                // Waveform bars
+                // Waveform bars (non-interactive)
                 Canvas { gc, size in
                     guard let peaks = waveforms.peaks(for: track.url), !peaks.isEmpty else { return }
                     let n = peaks.count
@@ -62,29 +62,25 @@ struct WaveformView: View {
                         gc.fill(Path(rect), with: .color(color))
                     }
                 }
+                .allowsHitTesting(false)
 
-                // Dim the trimmed-off regions
-                if startX > 0 {
-                    Theme.background.opacity(0.55).frame(width: startX, height: H)
+                // Dim the trimmed-off regions (non-interactive)
+                Group {
+                    if startX > 0 {
+                        Theme.background.opacity(0.55).frame(width: startX, height: H)
+                    }
+                    if endX < W {
+                        Theme.background.opacity(0.55)
+                            .frame(width: W - endX, height: H)
+                            .offset(x: endX)
+                    }
+                    if isPlayingThis {
+                        Rectangle().fill(Theme.accent).frame(width: 1.5, height: H).offset(x: posX)
+                    }
                 }
-                if endX < W {
-                    Theme.background.opacity(0.55)
-                        .frame(width: W - endX, height: H)
-                        .offset(x: endX)
-                }
+                .allowsHitTesting(false)
 
-                // Position line
-                if isPlayingThis {
-                    Rectangle().fill(Theme.accent).frame(width: 1.5, height: H).offset(x: posX)
-                }
-
-                // Start / end markers
-                marker(x: startX, height: H, label: "▸")
-                    .gesture(dragStart(ref: ref, track: track, width: W, dur: dur, endVal: endVal))
-                marker(x: endX, height: H, label: "◂")
-                    .gesture(dragEnd(ref: ref, track: track, width: W, dur: dur))
-
-                // Time readouts
+                // Time readouts (non-interactive)
                 VStack {
                     Spacer()
                     HStack {
@@ -100,6 +96,13 @@ struct WaveformView: View {
                     .padding(.horizontal, 6)
                     .padding(.bottom, 2)
                 }
+                .allowsHitTesting(false)
+
+                // Draggable start / end markers — topmost so nothing intercepts.
+                marker(x: startX, height: H, label: "▸")
+                    .highPriorityGesture(dragStart(ref: ref, track: track, width: W, dur: dur, endVal: endVal))
+                marker(x: endX, height: H, label: "◂")
+                    .highPriorityGesture(dragEnd(ref: ref, track: track, width: W, dur: dur))
             }
             .coordinateSpace(name: "wave")
             .onAppear { waveforms.ensure(track.url) }
@@ -117,14 +120,14 @@ struct WaveformView: View {
                 .background(Theme.accent, in: RoundedRectangle(cornerRadius: 3))
                 .offset(y: -height / 2 + 9)
         }
-        .frame(width: 16, height: height)
+        .frame(width: 24, height: height)
         .contentShape(Rectangle())
-        .offset(x: x - 8)
+        .offset(x: x - 12)
     }
 
     private func dragStart(ref: TrackRef, track: Track, width: CGFloat,
                            dur: Double, endVal: Double) -> some Gesture {
-        DragGesture(coordinateSpace: .named("wave")).onChanged { v in
+        DragGesture(minimumDistance: 0, coordinateSpace: .named("wave")).onChanged { v in
             let t = min(max(0, Double(v.location.x / width) * dur), endVal - 1)
             app.updateTrim(groupID: ref.groupID, trackID: ref.trackID,
                            start: t, end: track.trimEnd)
@@ -132,7 +135,7 @@ struct WaveformView: View {
     }
 
     private func dragEnd(ref: TrackRef, track: Track, width: CGFloat, dur: Double) -> some Gesture {
-        DragGesture(coordinateSpace: .named("wave")).onChanged { v in
+        DragGesture(minimumDistance: 0, coordinateSpace: .named("wave")).onChanged { v in
             let t = min(max(track.trimStart + 1, Double(v.location.x / width) * dur), dur)
             app.updateTrim(groupID: ref.groupID, trackID: ref.trackID,
                            start: track.trimStart, end: t >= dur - 0.05 ? nil : t)
