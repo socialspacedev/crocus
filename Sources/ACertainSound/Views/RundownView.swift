@@ -139,7 +139,7 @@ private struct GroupCard: View {
                               lineWidth: 1)
         )
         .contentShape(Rectangle())
-        .onTapGesture { app.selectedGroupID = group.id }
+        .onTapGesture { app.resignTextFocus(); app.selectedGroupID = group.id }
         .dropDestination(for: DragPayload.self) { items, _ in
             for p in items { app.handleDrop(p, intoGroup: group.id, at: nil) }
             return !items.isEmpty
@@ -221,6 +221,7 @@ private struct TrackRow: View {
         .background(isCurrent ? Theme.accentSoft : (isFocused ? Theme.surfaceHi.opacity(0.6) : Color.clear))
         .contentShape(Rectangle())
         .onTapGesture {
+            app.resignTextFocus()
             app.selectedGroupID = group.id
             app.focus(TrackRef(groupID: group.id, trackID: track.id))
         }

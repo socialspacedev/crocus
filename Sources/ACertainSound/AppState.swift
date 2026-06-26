@@ -78,6 +78,7 @@ final class AppState: ObservableObject {
     }
 
     func playGroup(_ group: SongGroup) {
+        resignTextFocus()
         selectedGroupID = group.id
         playSelectedGroup()
     }
@@ -92,9 +93,10 @@ final class AppState: ObservableObject {
         if next < show.groups.count { playGroup(show.groups[next]) }
     }
 
-    func stop() { engine.stop() }
-    func skipSong() { engine.skipSong() }
-    func fadeToTalk() { engine.startFadeToTalk() }
+    func stop() { resignTextFocus(); engine.stop() }
+    func skipSong() { resignTextFocus(); engine.skipSong() }
+    func previousSong() { resignTextFocus(); engine.previousSong() }
+    func fadeToTalk() { resignTextFocus(); engine.startFadeToTalk() }
     func requestImport() { showImporter = true }
 
     /// Release any focused text field so single-key shortcuts work again.
@@ -266,12 +268,18 @@ final class AppState: ObservableObject {
         saveShow()
     }
 
-    func updateTrim(groupID: SongGroup.ID, trackID: Track.ID,
-                    start: TimeInterval, end: TimeInterval?) {
+    /// Update trim in memory without writing to disk (used live during a drag).
+    func setTrim(groupID: SongGroup.ID, trackID: Track.ID,
+                 start: TimeInterval, end: TimeInterval?) {
         guard let gi = show.groups.firstIndex(where: { $0.id == groupID }),
               let ti = show.groups[gi].tracks.firstIndex(where: { $0.id == trackID }) else { return }
         show.groups[gi].tracks[ti].trimStart = max(0, start)
         show.groups[gi].tracks[ti].trimEnd = end
+    }
+
+    func updateTrim(groupID: SongGroup.ID, trackID: Track.ID,
+                    start: TimeInterval, end: TimeInterval?) {
+        setTrim(groupID: groupID, trackID: trackID, start: start, end: end)
         saveShow()
     }
 
@@ -292,7 +300,10 @@ final class AppState: ObservableObject {
     /// any, else the user's focused selection.
     var waveformContext: (ref: TrackRef, track: Track)? {
         if engine.state != .stopped, let cur = engine.currentTrack, let gid = selectedGroupID {
-            return (TrackRef(groupID: gid, trackID: cur.id), cur)
+            let ref = TrackRef(groupID: gid, trackID: cur.id)
+            // Prefer the editable stored track so trim edits show; fall back to
+            // the engine's snapshot if it isn't in the group for some reason.
+            return (ref, track(for: ref) ?? cur)
         }
         if let ref = focusedRef, let t = track(for: ref) { return (ref, t) }
         return nil

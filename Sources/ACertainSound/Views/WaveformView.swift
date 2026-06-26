@@ -112,12 +112,15 @@ struct WaveformView: View {
                         } else {
                             liveEnd = min(max((liveStart ?? curStart) + 1, t), dur)
                         }
-                    }
-                    .onEnded { _ in
+                        // Commit to the model in memory each step so the new trim
+                        // sticks even if the release event is missed.
                         let s = liveStart ?? track.trimStart
                         let e = liveEnd ?? (track.trimEnd ?? dur)
-                        app.updateTrim(groupID: ref.groupID, trackID: ref.trackID,
-                                       start: s, end: e >= dur - 0.05 ? nil : e)
+                        app.setTrim(groupID: ref.groupID, trackID: ref.trackID,
+                                    start: s, end: e >= dur - 0.05 ? nil : e)
+                    }
+                    .onEnded { _ in
+                        app.saveShow()
                         activeMarker = nil; liveStart = nil; liveEnd = nil
                     }
             )

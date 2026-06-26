@@ -114,6 +114,36 @@ final class AudioEngine: ObservableObject {
         }
     }
 
+    /// Restart the current song, or (if near its start) jump to the previous one.
+    func previousSong() {
+        guard state != .stopped else { return }
+        if currentElapsed > 2 || index == 0 {
+            playIndex(index)
+        } else {
+            playIndex(index - 1)
+        }
+    }
+
+    /// Load and play a specific index in the current group on the active deck.
+    private func playIndex(_ i: Int) {
+        guard i >= 0, i < queue.count else { return }
+        clearDuck()
+        idleDeck.stop()
+        idleDeck.volume = 1
+        activeDeck.stop()
+        activeDeck.volume = 1
+        guard let dur = loadSegment(queue[i], on: activeDeck) else { stop(); return }
+        activeSegmentDuration = dur
+        activeDeck.play()
+        index = i
+        state = .playing
+        currentTrack = queue[i]
+        upNextTrack = i + 1 < queue.count ? queue[i + 1] : nil
+        isCrossfading = false
+        crossfadeStartElapsed = nil
+        if timer == nil { startTimer() }
+    }
+
     /// Toggle "fade to talk": duck the music down to a bed level and hold it there
     /// so you can talk over the song; press again to bring it back up. The duck
     /// time is clamped so it never runs past the end of the current song.

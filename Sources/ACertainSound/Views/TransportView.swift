@@ -24,6 +24,9 @@ struct TransportView: View {
                     TransportButton(system: "stop.fill", hint: ".") { app.stop() }
                         .disabled(engine.state == .stopped)
 
+                    TransportButton(system: "backward.fill", hint: "P") { app.previousSong() }
+                        .disabled(engine.state == .stopped)
+
                     Button { app.playPause() } label: {
                         Image(systemName: engine.state == .playing ? "pause.fill" : "play.fill")
                             .font(.system(size: 16, weight: .bold))

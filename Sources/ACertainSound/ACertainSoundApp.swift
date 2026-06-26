@@ -34,6 +34,7 @@ struct ACertainSoundApp: App {
             // fire while you're typing in a text field.
             CommandMenu("Playback") {
                 Button(app.engine.state == .playing ? "Pause" : "Play") { app.playPause() }
+                Button("Previous Song") { app.previousSong() }
                 Button("Skip Song") { app.skipSong() }
                 Button("Play Next Group") { app.playNextGroup() }
                 Divider()
