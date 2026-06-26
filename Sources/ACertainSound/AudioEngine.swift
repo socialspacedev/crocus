@@ -41,6 +41,10 @@ final class AudioEngine: ObservableObject {
 
     private var activeSegmentDuration: TimeInterval = 0
     private var idleSegmentDuration: TimeInterval = 0
+    /// The trim start the active audio was actually scheduled from, and the full
+    /// duration that was scheduled — used to honour live end-marker edits.
+    private var activeSegmentStart: TimeInterval = 0
+    private var activeSegmentScheduledDuration: TimeInterval = 0
 
     private var timer: Timer?
     private var crossfadeStartElapsed: TimeInterval?
@@ -79,7 +83,7 @@ final class AudioEngine: ObservableObject {
             stop()
             return
         }
-        activeSegmentDuration = dur
+        setActiveSegment(dur: dur, start: queue[0].trimStart)
         deckA.play()
         state = .playing
         currentTrack = queue[0]
@@ -133,7 +137,7 @@ final class AudioEngine: ObservableObject {
         activeDeck.stop()
         activeDeck.volume = 1
         guard let dur = loadSegment(queue[i], on: activeDeck) else { stop(); return }
-        activeSegmentDuration = dur
+        setActiveSegment(dur: dur, start: queue[i].trimStart)
         activeDeck.play()
         index = i
         state = .playing
@@ -292,6 +296,25 @@ final class AudioEngine: ObservableObject {
         }
     }
 
+    private func setActiveSegment(dur: TimeInterval, start: TimeInterval) {
+        activeSegmentDuration = dur
+        activeSegmentScheduledDuration = dur
+        activeSegmentStart = start
+    }
+
+    /// Honour an end-marker edit on the currently-playing song without a restart.
+    /// Only shortening takes effect live (we can't play past what was scheduled);
+    /// a later end / a new start applies the next time the group plays.
+    func applyLiveTrim(trackID: UUID, trimStart: TimeInterval, trimEnd: TimeInterval?) {
+        guard state != .stopped, var cur = currentTrack, cur.id == trackID else { return }
+        let end = trimEnd ?? cur.duration
+        let desired = max(0.2, end - activeSegmentStart)
+        activeSegmentDuration = min(activeSegmentScheduledDuration, desired)
+        cur.trimStart = max(0, trimStart)
+        cur.trimEnd = trimEnd
+        currentTrack = cur
+    }
+
     /// Reset any voiceover ducking back to full volume (on song change/stop).
     private func clearDuck() {
         isFadingToTalk = false
@@ -318,7 +341,7 @@ final class AudioEngine: ObservableObject {
         idleDeck.volume = 1
         activeIsA.toggle()
         index += 1
-        activeSegmentDuration = idleSegmentDuration
+        setActiveSegment(dur: idleSegmentDuration, start: queue[index].trimStart)
         isCrossfading = false
         crossfadeStartElapsed = nil
         currentTrack = queue[index]
@@ -332,7 +355,7 @@ final class AudioEngine: ObservableObject {
         activeDeck.stop()
         activeDeck.volume = 1
         guard let dur = loadSegment(queue[nextIndex], on: activeDeck) else { stop(); return }
-        activeSegmentDuration = dur
+        setActiveSegment(dur: dur, start: queue[nextIndex].trimStart)
         activeDeck.play()
         index = nextIndex
         currentTrack = queue[index]

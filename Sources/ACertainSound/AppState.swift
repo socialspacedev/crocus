@@ -275,6 +275,8 @@ final class AppState: ObservableObject {
               let ti = show.groups[gi].tracks.firstIndex(where: { $0.id == trackID }) else { return }
         show.groups[gi].tracks[ti].trimStart = max(0, start)
         show.groups[gi].tracks[ti].trimEnd = end
+        // If this song is playing right now, honour an end-marker shorten live.
+        engine.applyLiveTrim(trackID: trackID, trimStart: max(0, start), trimEnd: end)
     }
 
     func updateTrim(groupID: SongGroup.ID, trackID: Track.ID,
