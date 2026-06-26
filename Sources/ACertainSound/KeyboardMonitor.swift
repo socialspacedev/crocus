@@ -6,14 +6,38 @@ import AppKit
 @MainActor
 final class KeyboardMonitor {
     private var monitor: Any?
+    private var mouseMonitor: Any?
     private weak var app: AppState?
 
     func start(app: AppState) {
         self.app = app
-        guard monitor == nil else { return }
-        monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            self?.handle(event) ?? event
+        if monitor == nil {
+            monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+                self?.handle(event) ?? event
+            }
         }
+        // Any click that isn't on a text field releases the keyboard focus, so
+        // the single-key transport controls keep working after you edit a field.
+        if mouseMonitor == nil {
+            mouseMonitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { event in
+                if let window = event.window, let content = window.contentView {
+                    let pt = content.convert(event.locationInWindow, from: nil)
+                    if !KeyboardMonitor.isTextEntry(content.hitTest(pt)) {
+                        DispatchQueue.main.async { window.makeFirstResponder(nil) }
+                    }
+                }
+                return event
+            }
+        }
+    }
+
+    private static func isTextEntry(_ view: NSView?) -> Bool {
+        var v = view
+        while let cur = v {
+            if cur is NSTextView || cur is NSTextField { return true }
+            v = cur.superview
+        }
+        return false
     }
 
     private func handle(_ event: NSEvent) -> NSEvent? {
