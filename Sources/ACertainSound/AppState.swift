@@ -30,6 +30,7 @@ final class AppState: ObservableObject {
     private let showURL: URL
     private let libraryURL: URL
     private let showsDir: URL
+    private let mediaDir: URL
     private var cancellables: Set<AnyCancellable> = []
 
     private init() {
@@ -42,6 +43,10 @@ final class AppState: ObservableObject {
         libraryURL = base.appendingPathComponent("library.json")
         showsDir = base.appendingPathComponent("Shows", isDirectory: true)
         try? FileManager.default.createDirectory(at: showsDir, withIntermediateDirectories: true)
+        // Crocus-managed audio lives in ~/Music/Crocus/Media so imports never break.
+        mediaDir = FileManager.default.urls(for: .musicDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("Crocus/Media", isDirectory: true)
+        try? FileManager.default.createDirectory(at: mediaDir, withIntermediateDirectories: true)
         Self.migrateLegacyData(into: base)
         load()
 
@@ -161,14 +166,65 @@ final class AppState: ObservableObject {
                 collected.append(url)
             }
         }
-        let existing = Set(library.map { $0.url.standardizedFileURL })
-        let newURLs = collected.filter { !existing.contains($0.standardizedFileURL) }
-        let newTracks = newURLs.map { makeTrack(from: $0) }
+        // Copy each source into the managed Media folder, then add (deduped by
+        // the managed destination so re-importing the same file is a no-op).
+        var newTracks: [Track] = []
+        for src in collected {
+            let dest = copyIntoMedia(src)
+            let key = dest.standardizedFileURL
+            if library.contains(where: { $0.url.standardizedFileURL == key }) { continue }
+            if newTracks.contains(where: { $0.url.standardizedFileURL == key }) { continue }
+            newTracks.append(makeTrack(from: dest))
+        }
         guard !newTracks.isEmpty else { return }
         library.append(contentsOf: newTracks)
         saveLibrary()
         enrichMetadata(for: newTracks)
         for t in newTracks { ArtworkCache.shared.ensure(t.url) }
+    }
+
+    /// Copy a source file into the managed Media folder with a tidy name.
+    /// Reuses an existing identical copy; returns the original on failure.
+    private func copyIntoMedia(_ src: URL) -> URL {
+        let fm = FileManager.default
+        let cleaned = sanitizedFileName(src.lastPathComponent)
+        var dest = mediaDir.appendingPathComponent(cleaned)
+        if fm.fileExists(atPath: dest.path) {
+            let s = fileSize(src), d = fileSize(dest)
+            if s >= 0, s == d { return dest }          // identical file already managed
+            dest = freeName(base: cleaned)             // name clash, different file
+        }
+        do { try fm.copyItem(at: src, to: dest); return dest }
+        catch { return src }
+    }
+
+    private func fileSize(_ url: URL) -> Int {
+        guard let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
+              let n = attrs[.size] as? Int else { return -1 }
+        return n
+    }
+
+    private func sanitizedFileName(_ name: String) -> String {
+        let ext = (name as NSString).pathExtension
+        var base = (name as NSString).deletingPathExtension
+        base = base.components(separatedBy: CharacterSet(charactersIn: "/\\:*?\"<>|"))
+                   .joined(separator: "-")
+        base = base.trimmingCharacters(in: .whitespacesAndNewlines)
+        while base.contains("  ") { base = base.replacingOccurrences(of: "  ", with: " ") }
+        if base.isEmpty { base = "track" }
+        return ext.isEmpty ? base : "\(base).\(ext)"
+    }
+
+    private func freeName(base: String) -> URL {
+        let ext = (base as NSString).pathExtension
+        let stem = (base as NSString).deletingPathExtension
+        var n = 1
+        while true {
+            let candidate = ext.isEmpty ? "\(stem) (\(n))" : "\(stem) (\(n)).\(ext)"
+            let url = mediaDir.appendingPathComponent(candidate)
+            if !FileManager.default.fileExists(atPath: url.path) { return url }
+            n += 1
+        }
     }
 
     func removeFromLibrary(_ track: Track) {
