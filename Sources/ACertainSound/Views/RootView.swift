@@ -4,6 +4,7 @@ import UniformTypeIdentifiers
 struct RootView: View {
     @EnvironmentObject var app: AppState
     @State private var keyMonitor = KeyboardMonitor()
+    @State private var playDropTargeted = false
 
     var body: some View {
         ZStack {
@@ -17,6 +18,16 @@ struct RootView: View {
                     NowPlayingView()
                         .contentShape(Rectangle())
                         .onTapGesture { app.resignTextFocus() }
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .strokeBorder(Theme.accent, lineWidth: playDropTargeted ? 2 : 0)
+                                .allowsHitTesting(false)
+                        )
+                        // Drop a song here to play it immediately (mix on the fly).
+                        .dropDestination(for: DragPayload.self) { items, _ in
+                            if let p = items.first { app.playSingle(p) }
+                            return !items.isEmpty
+                        } isTargeted: { playDropTargeted = $0 }
                     WaveformView()
                 }
                 .padding(.horizontal, 24)
@@ -132,7 +143,18 @@ struct ShowHeaderView: View {
                     .buttonStyle(.plain)
                     .foregroundStyle(Theme.textSecondary)
                 }
-                BatteryView()
+                HStack(spacing: 14) {
+                    HStack(spacing: 5) {
+                        Image(systemName: "clock")
+                            .font(.system(size: 11))
+                            .foregroundStyle(Theme.textTertiary)
+                        Text("\(TimeFmt.clock(app.show.totalPlaytime)) total")
+                            .font(Theme.mono(12, .medium))
+                            .foregroundStyle(Theme.textSecondary)
+                            .help("Total show playtime (sum of group playtimes, trimmed)")
+                    }
+                    BatteryView()
+                }
             }
         }
         .padding(.horizontal, 24)

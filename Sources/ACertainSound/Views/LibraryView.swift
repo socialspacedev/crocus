@@ -4,6 +4,7 @@ import SwiftUI
 struct LibraryView: View {
     @EnvironmentObject var app: AppState
     @State private var search = ""
+    @State private var dropTargeted = false
 
     private var filtered: [Track] {
         guard !search.isEmpty else { return app.library }
@@ -62,6 +63,16 @@ struct LibraryView: View {
             }
         }
         .background(Theme.background)
+        .overlay(
+            Rectangle()
+                .strokeBorder(Theme.accent, lineWidth: dropTargeted ? 2 : 0)
+                .allowsHitTesting(false)
+        )
+        // Drag files / folders from Finder, Desktop, etc. straight in.
+        .dropDestination(for: URL.self) { urls, _ in
+            app.importItems(urls)
+            return !urls.isEmpty
+        } isTargeted: { dropTargeted = $0 }
     }
 
     private var emptyState: some View {

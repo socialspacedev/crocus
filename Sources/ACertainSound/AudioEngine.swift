@@ -15,6 +15,9 @@ final class AudioEngine: ObservableObject {
     @Published private(set) var currentTrack: Track?
     @Published private(set) var upNextTrack: Track?
     @Published private(set) var currentElapsed: TimeInterval = 0
+    /// Real playback position within the file (trim-start + elapsed). Drives the
+    /// waveform position line independently of any live trim edits.
+    @Published private(set) var playheadAbsolute: TimeInterval = 0
     @Published private(set) var currentSegmentDuration: TimeInterval = 0
     @Published private(set) var groupRemaining: TimeInterval = 0
     @Published private(set) var isCrossfading = false
@@ -28,6 +31,10 @@ final class AudioEngine: ObservableObject {
     private let engine = AVAudioEngine()
     private let deckA = AVAudioPlayerNode()
     private let deckB = AVAudioPlayerNode()
+
+    /// Called when a group finishes playing naturally (not on manual stop).
+    var onGroupFinished: (() -> Void)?
+    private var cueNextOnEnd = true
 
     private var queue: [Track] = []
     private var index = 0
@@ -65,14 +72,34 @@ final class AudioEngine: ObservableObject {
     // MARK: - Public transport
 
     func playGroup(_ tracks: [Track], crossfade: TimeInterval,
-                   fadeToTalk: TimeInterval, duckLevel: Float) {
+                   fadeToTalk: TimeInterval, duckLevel: Float, cueNext: Bool = true) {
+        guard prepareGroup(tracks, crossfade: crossfade, fadeToTalk: fadeToTalk,
+                           duckLevel: duckLevel, cueNext: cueNext) else { return }
+        deckA.play()
+        state = .playing
+        startTimer()
+    }
+
+    /// Load a group's first track but stay paused/cued — ready to play with Space.
+    func cueGroup(_ tracks: [Track], crossfade: TimeInterval,
+                  fadeToTalk: TimeInterval, duckLevel: Float) {
+        guard prepareGroup(tracks, crossfade: crossfade, fadeToTalk: fadeToTalk,
+                           duckLevel: duckLevel, cueNext: true) else { return }
+        state = .paused
+        startTimer()
+    }
+
+    /// Shared setup for play/cue: load the first track on deck A (not yet playing).
+    private func prepareGroup(_ tracks: [Track], crossfade: TimeInterval,
+                              fadeToTalk: TimeInterval, duckLevel: Float, cueNext: Bool) -> Bool {
         stop()
         queue = tracks
         index = 0
         crossfadeDuration = max(0, crossfade)
         fadeToTalkDuration = max(1, fadeToTalk)
         self.duckLevel = min(0.95, max(0.05, duckLevel))
-        guard !queue.isEmpty else { return }
+        cueNextOnEnd = cueNext
+        guard !queue.isEmpty else { return false }
 
         ensureRunning()
         activeIsA = true
@@ -81,14 +108,14 @@ final class AudioEngine: ObservableObject {
 
         guard let dur = loadSegment(queue[0], on: deckA) else {
             stop()
-            return
+            return false
         }
         setActiveSegment(dur: dur, start: queue[0].trimStart)
-        deckA.play()
-        state = .playing
+        currentSegmentDuration = dur
         currentTrack = queue[0]
         upNextTrack = queue.count > 1 ? queue[1] : nil
-        startTimer()
+        groupRemaining = computeGroupRemaining(currentElapsed: 0)
+        return true
     }
 
     /// Space-bar action. Resumes/pauses; starting a group is handled by AppState.
@@ -192,6 +219,7 @@ final class AudioEngine: ObservableObject {
         currentTrack = nil
         upNextTrack = nil
         currentElapsed = 0
+        playheadAbsolute = 0
         currentSegmentDuration = 0
         groupRemaining = 0
         isCrossfading = false
@@ -263,6 +291,7 @@ final class AudioEngine: ObservableObject {
         guard state == .playing else { return }
         let e = elapsed(activeDeck)
         currentElapsed = e
+        playheadAbsolute = activeSegmentStart + e
         currentSegmentDuration = activeSegmentDuration
         groupRemaining = computeGroupRemaining(currentElapsed: e)
 
@@ -292,14 +321,23 @@ final class AudioEngine: ObservableObject {
         } else if hasNext, crossfadeDuration > 0, remaining <= crossfadeDuration, !suppressCrossfade {
             beginCrossfade()
         } else if remaining <= 0 {
-            if hasNext { hardAdvance() } else { stop() }
+            if hasNext { hardAdvance() } else { endOfGroup() }
         }
+    }
+
+    /// The group finished playing on its own — go silent, then let AppState cue
+    /// the next group (paused). Manual stop does not trigger this.
+    private func endOfGroup() {
+        let shouldCue = cueNextOnEnd
+        stop()
+        if shouldCue { onGroupFinished?() }
     }
 
     private func setActiveSegment(dur: TimeInterval, start: TimeInterval) {
         activeSegmentDuration = dur
         activeSegmentScheduledDuration = dur
         activeSegmentStart = start
+        playheadAbsolute = start
     }
 
     /// Honour an end-marker edit on the currently-playing song without a restart.
@@ -313,6 +351,30 @@ final class AudioEngine: ObservableObject {
         cur.trimStart = max(0, trimStart)
         cur.trimEnd = trimEnd
         currentTrack = cur
+    }
+
+    /// Reschedule the currently-playing/cued song to honour a new start (and end)
+    /// — i.e. jump the audio to the new start marker. Keeps playing if it was
+    /// playing, stays cued if it was paused.
+    func rescheduleCurrentFromStart(trackID: UUID, trimStart: TimeInterval, trimEnd: TimeInterval?) {
+        guard state != .stopped, let cur = currentTrack, cur.id == trackID, index < queue.count
+        else { return }
+        let wasPlaying = (state == .playing)
+        clearDuck()
+        idleDeck.stop(); idleDeck.volume = 1
+        activeDeck.stop(); activeDeck.volume = 1
+        var t = cur
+        t.trimStart = max(0, trimStart)
+        t.trimEnd = trimEnd
+        queue[index] = t
+        guard let dur = loadSegment(t, on: activeDeck) else { stop(); return }
+        setActiveSegment(dur: dur, start: t.trimStart)
+        currentSegmentDuration = dur
+        currentElapsed = 0
+        currentTrack = t
+        isCrossfading = false
+        crossfadeStartElapsed = nil
+        if wasPlaying { activeDeck.play() }
     }
 
     /// Reset any voiceover ducking back to full volume (on song change/stop).

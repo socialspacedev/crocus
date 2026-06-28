@@ -42,7 +42,8 @@ struct WaveformView: View {
         let curStart = liveStart ?? track.trimStart
         let curEnd = liveEnd ?? (track.trimEnd ?? dur)
         let isPlayingThis = engine.state != .stopped && engine.currentTrack?.id == track.id
-        let posTime = track.trimStart + engine.currentElapsed
+        let posTime = engine.playheadAbsolute          // real audio position
+        let hasTrim = track.trimStart > 0 || track.trimEnd != nil
 
         return GeometryReader { geo in
             let W = geo.size.width
@@ -121,9 +122,29 @@ struct WaveformView: View {
                     }
                     .onEnded { _ in
                         app.saveShow()
+                        // If the start marker of the playing song moved, jump the
+                        // audio to the new start so it's honoured live.
+                        if activeMarker == 0, engine.state != .stopped,
+                           engine.currentTrack?.id == track.id {
+                            app.reseekCurrentToTrim(ref)
+                        }
                         activeMarker = nil; liveStart = nil; liveEnd = nil
                     }
             )
+            .overlay(alignment: .topTrailing) {
+                if hasTrim {
+                    Button { app.resetTrim(ref) } label: {
+                        Label("Reset", systemImage: "arrow.uturn.backward")
+                            .font(.system(size: 10, weight: .medium))
+                            .padding(.horizontal, 7).padding(.vertical, 3)
+                            .background(Theme.surfaceHi, in: Capsule())
+                            .foregroundStyle(Theme.textSecondary)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Reset trim to full length")
+                    .padding(6)
+                }
+            }
             .onAppear { waveforms.ensure(track.url) }
             .onChange(of: track.url) { _, newURL in
                 waveforms.ensure(newURL)

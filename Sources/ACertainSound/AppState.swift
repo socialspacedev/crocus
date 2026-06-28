@@ -49,6 +49,9 @@ final class AppState: ObservableObject {
         engine.$state
             .sink { [weak self] st in self?.power.setKeepAwake(st == .playing) }
             .store(in: &cancellables)
+
+        // When a group finishes on its own, cue the next group paused.
+        engine.onGroupFinished = { [weak self] in self?.cueNextGroupPaused() }
     }
 
     // MARK: - Derived
@@ -91,6 +94,48 @@ final class AppState: ObservableObject {
         }
         let next = i + 1
         if next < show.groups.count { playGroup(show.groups[next]) }
+    }
+
+    /// After a group ends, load the next one paused/cued on its first track.
+    func cueNextGroupPaused() {
+        guard let current = selectedGroupID,
+              let i = show.groups.firstIndex(where: { $0.id == current }) else { return }
+        let next = i + 1
+        guard next < show.groups.count else { return }   // last group: stay off air
+        let g = show.groups[next]
+        selectedGroupID = g.id
+        focusedRef = nil
+        guard !g.tracks.isEmpty else { return }
+        engine.cueGroup(g.tracks, crossfade: show.crossfadeDuration,
+                        fadeToTalk: show.duckTime, duckLevel: Float(show.duckLevel))
+    }
+
+    /// Play a single dragged song immediately (one-off — doesn't auto-cue next).
+    func playSingle(_ payload: DragPayload) {
+        let t: Track?
+        if let from = payload.fromGroupID {
+            t = show.groups.first { $0.id == from }?.tracks.first { $0.id == payload.trackID }
+        } else {
+            t = library.first { $0.id == payload.trackID }
+        }
+        guard let track = t else { return }
+        engine.playGroup([track], crossfade: 0,
+                         fadeToTalk: show.duckTime, duckLevel: Float(show.duckLevel),
+                         cueNext: false)
+    }
+
+    /// Jump the currently-playing song's audio to its (edited) start marker.
+    func reseekCurrentToTrim(_ ref: TrackRef) {
+        guard let t = track(for: ref) else { return }
+        engine.rescheduleCurrentFromStart(trackID: t.id, trimStart: t.trimStart, trimEnd: t.trimEnd)
+    }
+
+    /// Clear a song's trim back to full length.
+    func resetTrim(_ ref: TrackRef) {
+        updateTrim(groupID: ref.groupID, trackID: ref.trackID, start: 0, end: nil)
+        if engine.state != .stopped, engine.currentTrack?.id == ref.trackID {
+            engine.rescheduleCurrentFromStart(trackID: ref.trackID, trimStart: 0, trimEnd: nil)
+        }
     }
 
     func stop() { resignTextFocus(); engine.stop() }

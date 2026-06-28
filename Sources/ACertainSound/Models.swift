@@ -58,6 +58,9 @@ struct Show: Codable, Identifiable {
 
     var displayTitle: String { "\(name) #\(number)" }
 
+    /// Sum of every group's playtime, using each song's trimmed length.
+    var totalPlaytime: TimeInterval { groups.reduce(0) { $0 + $1.totalDuration } }
+
     var formattedDate: String {
         let f = DateFormatter()
         f.dateFormat = "MMMM d, yyyy"
