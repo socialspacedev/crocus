@@ -215,6 +215,60 @@ final class AppState: ObservableObject {
         return ext.isEmpty ? base : "\(base).\(ext)"
     }
 
+    /// Managed-media files not referenced by the library, current show, or any
+    /// archived show — safe to reclaim.
+    private func unusedMediaFiles() -> [URL] {
+        let fm = FileManager.default
+        var referenced = Set<String>()
+        for t in library { referenced.insert(t.url.standardizedFileURL.path) }
+        for g in show.groups { for t in g.tracks { referenced.insert(t.url.standardizedFileURL.path) } }
+        let dec = JSONDecoder(); dec.dateDecodingStrategy = .iso8601
+        let showFiles = (try? fm.contentsOfDirectory(at: showsDir, includingPropertiesForKeys: nil)) ?? []
+        for f in showFiles where f.pathExtension == "json" {
+            if let d = try? Data(contentsOf: f), let s = try? dec.decode(Show.self, from: d) {
+                for g in s.groups { for t in g.tracks { referenced.insert(t.url.standardizedFileURL.path) } }
+            }
+        }
+        let media = (try? fm.contentsOfDirectory(at: mediaDir, includingPropertiesForKeys: nil)) ?? []
+        return media.filter { f in
+            !f.lastPathComponent.hasPrefix(".") &&
+            !referenced.contains(f.standardizedFileURL.path)
+        }
+    }
+
+    /// Move unreferenced managed files to the Trash, with a confirmation.
+    func cleanUnusedMedia() {
+        let candidates = unusedMediaFiles()
+        guard !candidates.isEmpty else {
+            infoAlert("Nothing to clean", "Every file in your Media folder is still used by the library or a show.")
+            return
+        }
+        let totalBytes = candidates.reduce(0) { $0 + max(0, fileSize($1)) }
+        let alert = NSAlert()
+        alert.messageText = "Clean Unused Media?"
+        alert.informativeText = "\(candidates.count) file(s) (\(formatBytes(totalBytes))) in your Media folder aren't used by the library or any show. Move them to the Trash?"
+        alert.addButton(withTitle: "Move to Trash")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        var trashed = 0
+        for f in candidates where (try? FileManager.default.trashItem(at: f, resultingItemURL: nil)) != nil {
+            trashed += 1
+        }
+        infoAlert("Cleaned up", "Moved \(trashed) file(s) to the Trash.")
+    }
+
+    private func formatBytes(_ bytes: Int) -> String {
+        ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file)
+    }
+
+    private func infoAlert(_ title: String, _ message: String) {
+        let a = NSAlert()
+        a.messageText = title
+        a.informativeText = message
+        a.addButton(withTitle: "OK")
+        a.runModal()
+    }
+
     private func freeName(base: String) -> URL {
         let ext = (base as NSString).pathExtension
         let stem = (base as NSString).deletingPathExtension

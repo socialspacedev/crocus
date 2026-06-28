@@ -27,6 +27,8 @@ struct ACertainSoundApp: App {
                     Button("Export Markdown…") { app.exportMarkdown() }
                     Button("Export CSV…") { app.exportCSV() }
                 }
+                Divider()
+                Button("Clean Unused Media…") { app.cleanUnusedMedia() }
             }
 
             // Playback menu — clickable mirrors of the single-key controls. No key
