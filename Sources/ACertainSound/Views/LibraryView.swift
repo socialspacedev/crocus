@@ -118,6 +118,16 @@ private struct LibraryRow: View {
 
             if hovering {
                 Button {
+                    app.editingLibraryTrackID = track.id
+                } label: {
+                    Image(systemName: "pencil")
+                        .font(.system(size: 13))
+                        .foregroundStyle(Theme.textSecondary)
+                }
+                .buttonStyle(.plain)
+                .help("Edit info")
+
+                Button {
                     app.addToCurrentGroup(track)
                 } label: {
                     Image(systemName: "plus.circle.fill")
@@ -142,6 +152,8 @@ private struct LibraryRow: View {
             return handled
         }
         .contextMenu {
+            Button("Edit Info…") { app.editingLibraryTrackID = track.id }
+            Divider()
             ForEach(app.show.groups) { g in
                 Button("Add to \(g.name)") { app.addToGroup(track, groupID: g.id) }
             }

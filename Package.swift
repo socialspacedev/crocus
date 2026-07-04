@@ -6,9 +6,18 @@ let package = Package(
     platforms: [
         .macOS(.v14)
     ],
+    dependencies: [
+        // Reads and writes ID3 tags in mp3 files (title/artist/album/year), so the
+        // metadata editor can fix wrong tags at the source. Pure Swift, no external
+        // binary — fetched once on first build.
+        .package(url: "https://github.com/chicio/ID3TagEditor", from: "5.5.0")
+    ],
     targets: [
         .executableTarget(
             name: "ACertainSound",
+            dependencies: [
+                .product(name: "ID3TagEditor", package: "ID3TagEditor")
+            ],
             path: "Sources/ACertainSound",
             swiftSettings: [
                 // Use the Swift 5 language mode to avoid strict-concurrency friction

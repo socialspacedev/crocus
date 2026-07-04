@@ -58,6 +58,12 @@ struct RootView: View {
         }
         .sheet(isPresented: $app.showArchive) { ShowsArchiveView() }
         .sheet(isPresented: $app.showShortcuts) { ShortcutsView() }
+        .sheet(isPresented: Binding(
+            get: { app.editingLibraryTrackID != nil },
+            set: { if !$0 { app.editingLibraryTrackID = nil } }
+        )) {
+            if let track = app.editingTrack { MetadataEditorView(track: track) }
+        }
     }
 }
 

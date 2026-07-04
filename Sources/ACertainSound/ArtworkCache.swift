@@ -15,6 +15,14 @@ final class ArtworkCache: ObservableObject {
 
     func image(for url: URL) -> NSImage? { images[url.path] }
 
+    /// Forget any cached art (or recorded miss) for a URL so the next `ensure`
+    /// re-reads it — e.g. after the file's tags/artwork have been rewritten.
+    func invalidate(_ url: URL) {
+        let key = url.path
+        images[key] = nil
+        misses.remove(key)
+    }
+
     func ensure(_ url: URL) {
         let key = url.path
         guard images[key] == nil, !inFlight.contains(key), !misses.contains(key) else { return }

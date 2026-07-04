@@ -20,6 +20,8 @@ final class AppState: ObservableObject {
     /// Sheets.
     @Published var showArchive = false
     @Published var showShortcuts = false
+    /// The library track currently open in the metadata editor sheet (nil = closed).
+    @Published var editingLibraryTrackID: Track.ID? = nil
     /// Which track the waveform panel edits when nothing is playing.
     @Published var focusedRef: TrackRef? = nil
 
@@ -382,6 +384,59 @@ final class AppState: ObservableObject {
             if let y = year { library[i].year = y; changed = true }
         }
         if changed { saveLibrary() }
+    }
+
+    // MARK: - Metadata editing
+
+    /// The library track backing the metadata editor sheet.
+    var editingTrack: Track? {
+        guard let id = editingLibraryTrackID else { return nil }
+        return library.first { $0.id == id }
+    }
+
+    /// Apply edited title/artist/album/year to the library entry AND to every
+    /// copy of the song already sitting in the current show's groups. Group
+    /// copies are matched by file URL, because a track dragged into a group is
+    /// given a fresh id (see `handleDrop`) — the URL is the stable join key.
+    /// `note` is intentionally left alone (it's per-group, edited in the rundown).
+    func updateTrackMetadata(id: Track.ID, title: String, artist: String,
+                             album: String, year: Int?) {
+        guard let li = library.firstIndex(where: { $0.id == id }) else { return }
+        let key = library[li].url.standardizedFileURL
+
+        library[li].title = title
+        library[li].artist = artist
+        library[li].album = album
+        library[li].year = year
+        saveLibrary()
+
+        var touchedShow = false
+        for gi in show.groups.indices {
+            for ti in show.groups[gi].tracks.indices
+            where show.groups[gi].tracks[ti].url.standardizedFileURL == key {
+                show.groups[gi].tracks[ti].title = title
+                show.groups[gi].tracks[ti].artist = artist
+                show.groups[gi].tracks[ti].album = album
+                show.groups[gi].tracks[ti].year = year
+                touchedShow = true
+            }
+        }
+        if touchedShow { saveShow() }
+    }
+
+    /// Write the given tags into the underlying audio file, then mirror them into
+    /// Crocus (library + groups) and refresh artwork. Throws on failure, leaving
+    /// the original file untouched (see `MetadataIO.writeFileTags`).
+    func writeTagsToFile(id: Track.ID, title: String, artist: String,
+                         album: String, year: Int?) async throws {
+        guard let track = library.first(where: { $0.id == id }) else { return }
+        let tags = FileTags(title: title.isEmpty ? nil : title,
+                            artist: artist.isEmpty ? nil : artist,
+                            album: album.isEmpty ? nil : album,
+                            year: year)
+        try await MetadataIO.writeFileTagsAsync(track.url, tags)
+        updateTrackMetadata(id: id, title: title, artist: artist, album: album, year: year)
+        ArtworkCache.shared.invalidate(track.url)
     }
 
     // MARK: - Rundown editing
