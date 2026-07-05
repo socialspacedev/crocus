@@ -28,6 +28,19 @@ struct LibraryView: View {
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(Theme.textSecondary)
+
+                Menu {
+                    Button("Import Music…") { app.requestImport() }
+                    Divider()
+                    Button("Clear Library…", role: .destructive) { app.clearLibrary() }
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .font(.system(size: 12, weight: .semibold))
+                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .foregroundStyle(Theme.textSecondary)
             }
             .padding(.horizontal, 16)
             .padding(.top, 14)
@@ -99,6 +112,9 @@ private struct LibraryRow: View {
     let track: Track
     @State private var hovering = false
 
+    /// A song already placed in the current show — kept to one appearance.
+    private var inShow: Bool { app.isInShow(track.url) }
+
     var body: some View {
         HStack(spacing: 8) {
             VStack(alignment: .leading, spacing: 2) {
@@ -111,10 +127,14 @@ private struct LibraryRow: View {
                     .foregroundStyle(Theme.textTertiary)
                     .lineLimit(1)
             }
+            .opacity(inShow ? 0.5 : 1)
+
             Spacer(minLength: 4)
+
             Text(TimeFmt.clock(track.duration))
                 .font(Theme.mono(11))
                 .foregroundStyle(Theme.textTertiary)
+                .opacity(inShow ? 0.5 : 1)
 
             if hovering {
                 Button {
@@ -126,7 +146,15 @@ private struct LibraryRow: View {
                 }
                 .buttonStyle(.plain)
                 .help("Edit info")
+            }
 
+            if inShow {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 14))
+                    .foregroundStyle(Theme.accent)
+                    .help("Already in this show")
+                    .transition(.scale.combined(with: .opacity))
+            } else if hovering {
                 Button {
                     app.addToCurrentGroup(track)
                 } label: {
@@ -142,6 +170,7 @@ private struct LibraryRow: View {
         .padding(.vertical, 7)
         .background(hovering ? Theme.surface : Color.clear,
                     in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .animation(.easeInOut(duration: 0.25), value: inShow)
         .onHover { hovering = $0 }
         .draggable(DragPayload(trackID: track.id, fromGroupID: nil))
         .dropDestination(for: DragPayload.self) { items, _ in
@@ -154,13 +183,16 @@ private struct LibraryRow: View {
         .contextMenu {
             Button("Edit Info…") { app.editingLibraryTrackID = track.id }
             Divider()
-            ForEach(app.show.groups) { g in
-                Button("Add to \(g.name)") { app.addToGroup(track, groupID: g.id) }
-            }
-            Divider()
-            Button("New Group with this Song") {
-                app.newGroup()
-                app.addToCurrentGroup(track)
+            if inShow {
+                Text("Already in this show")
+            } else {
+                ForEach(app.show.groups) { g in
+                    Button("Add to \(g.name)") { app.addToGroup(track, groupID: g.id) }
+                }
+                Button("New Group with this Song") {
+                    app.newGroup()
+                    app.addToCurrentGroup(track)
+                }
             }
             Divider()
             Button("Remove from Library", role: .destructive) {

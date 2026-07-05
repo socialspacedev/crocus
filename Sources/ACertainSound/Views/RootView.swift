@@ -154,10 +154,10 @@ struct ShowHeaderView: View {
                         Image(systemName: "clock")
                             .font(.system(size: 11))
                             .foregroundStyle(Theme.textTertiary)
-                        Text("\(TimeFmt.clock(app.show.totalPlaytime)) total")
+                        Text("\(app.show.trackCount) \(app.show.trackCount == 1 ? "track" : "tracks") · \(TimeFmt.clock(app.show.totalPlaytime)) total")
                             .font(Theme.mono(12, .medium))
                             .foregroundStyle(Theme.textSecondary)
-                            .help("Total show playtime (sum of group playtimes, trimmed)")
+                            .help("Songs in the rundown and total show playtime (trimmed)")
                     }
                     BatteryView()
                 }

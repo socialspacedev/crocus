@@ -38,6 +38,16 @@
                 <string>public.data</string>
             </array>
         </dict>
+        <dict>
+            <key>UTTypeIdentifier</key>
+            <string>com.andrewlong.crocus.group</string>
+            <key>UTTypeDescription</key>
+            <string>Crocus Group</string>
+            <key>UTTypeConformsTo</key>
+            <array>
+                <string>public.data</string>
+            </array>
+        </dict>
     </array>
 </dict>
 </plist>

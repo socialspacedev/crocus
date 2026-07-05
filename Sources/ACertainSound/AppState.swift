@@ -3,6 +3,7 @@ import AVFoundation
 import SwiftUI
 import AppKit
 import Combine
+import CryptoKit
 import UniformTypeIdentifiers
 
 /// Top-level app model: the imported library, the current show rundown, and the
@@ -168,21 +169,94 @@ final class AppState: ObservableObject {
                 collected.append(url)
             }
         }
-        // Copy each source into the managed Media folder, then add (deduped by
-        // the managed destination so re-importing the same file is a no-op).
+        guard !collected.isEmpty else { return }
+        Task { await ingest(collected) }
+    }
+
+    /// Read each source's tags, skip exact-match duplicates (identical file
+    /// content, OR same artist + title already in the library), then copy the
+    /// keepers into the managed Media folder and add them — pre-filled with their
+    /// tags so there's no filename flash.
+    private func ingest(_ sources: [URL]) async {
+        var titleArtistKeys = Set(library.map { artistTitleKey(artist: $0.artist, title: $0.title) })
+        var sizeIndex: [Int: [URL]] = [:]
+        for t in library {
+            let s = fileSize(t.url)
+            if s >= 0 { sizeIndex[s, default: []].append(t.url) }
+        }
+        var hashCache: [String: String] = [:]
+        func hashFor(_ url: URL) -> String? {
+            let p = url.standardizedFileURL.path
+            if let h = hashCache[p] { return h }
+            guard let h = contentHash(url) else { return nil }
+            hashCache[p] = h
+            return h
+        }
+
         var newTracks: [Track] = []
-        for src in collected {
+        var skipped = 0
+
+        for src in sources {
+            // Duplicate by identical file content (size first, then hash).
+            let size = fileSize(src)
+            var isDupe = false
+            if size >= 0, let candidates = sizeIndex[size], let srcHash = hashFor(src) {
+                isDupe = candidates.contains { hashFor($0) == srcHash }
+            }
+
+            let tags = await MetadataIO.readFileTags(src)
+            let title = (tags.title?.isEmpty == false) ? tags.title! : src.deletingPathExtension().lastPathComponent
+            let artist = tags.artist ?? ""
+            let taKey = artistTitleKey(artist: artist, title: title)
+
+            // Duplicate by artist + title.
+            if !isDupe, titleArtistKeys.contains(taKey) { isDupe = true }
+            if isDupe { skipped += 1; continue }
+
             let dest = copyIntoMedia(src)
             let key = dest.standardizedFileURL
-            if library.contains(where: { $0.url.standardizedFileURL == key }) { continue }
-            if newTracks.contains(where: { $0.url.standardizedFileURL == key }) { continue }
-            newTracks.append(makeTrack(from: dest))
+            if library.contains(where: { $0.url.standardizedFileURL == key })
+                || newTracks.contains(where: { $0.url.standardizedFileURL == key }) {
+                skipped += 1
+                continue
+            }
+
+            var track = makeTrack(from: dest)
+            track.title = title
+            track.artist = artist
+            if let al = tags.album, !al.isEmpty { track.album = al }
+            track.year = tags.year
+            newTracks.append(track)
+
+            // Register so later files in this same batch dedupe against it too.
+            titleArtistKeys.insert(taKey)
+            let ds = fileSize(dest)
+            if ds >= 0 { sizeIndex[ds, default: []].append(dest) }
+            if let h = hashFor(src) { hashCache[dest.standardizedFileURL.path] = h }
         }
-        guard !newTracks.isEmpty else { return }
-        library.append(contentsOf: newTracks)
-        saveLibrary()
-        enrichMetadata(for: newTracks)
-        for t in newTracks { ArtworkCache.shared.ensure(t.url) }
+
+        if !newTracks.isEmpty {
+            library.append(contentsOf: newTracks)
+            saveLibrary()
+            for t in newTracks { ArtworkCache.shared.ensure(t.url) }
+        }
+        if skipped > 0 {
+            infoAlert("Skipped duplicates",
+                      "\(skipped) \(skipped == 1 ? "file was" : "files were") already in the library (identical file, or same artist & title).")
+        }
+    }
+
+    /// A case-insensitive key for artist+title duplicate detection.
+    private func artistTitleKey(artist: String, title: String) -> String {
+        let a = artist.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        let t = title.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        return "\(a)\u{1}\(t)"
+    }
+
+    /// SHA-256 of a file's bytes (memory-mapped), for exact-content dedupe.
+    private func contentHash(_ url: URL) -> String? {
+        guard let data = try? Data(contentsOf: url, options: .mappedIfSafe) else { return nil }
+        return SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
     }
 
     /// Copy a source file into the managed Media folder with a tidy name.
@@ -288,6 +362,24 @@ final class AppState: ObservableObject {
         saveLibrary()
     }
 
+    /// Empty the whole library (with confirmation). Leaves the audio files in the
+    /// Media folder — reclaim disk later with "Clean Unused Media…". Songs already
+    /// in the current or saved shows are unaffected.
+    func clearLibrary() {
+        guard !library.isEmpty else {
+            infoAlert("Library is empty", "There are no songs to clear.")
+            return
+        }
+        let alert = NSAlert()
+        alert.messageText = "Clear the Library?"
+        alert.informativeText = "Remove all \(library.count) song(s) from the library. The audio files stay in your Media folder (reclaim disk later with “Clean Unused Media…”). Songs already in this show or a saved show are unaffected."
+        alert.addButton(withTitle: "Clear Library")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        library.removeAll()
+        saveLibrary()
+    }
+
     /// Reorder the library by dropping one song before another.
     func reorderLibrary(_ payload: DragPayload, before targetID: Track.ID) {
         guard payload.fromGroupID == nil, payload.trackID != targetID,
@@ -315,8 +407,9 @@ final class AppState: ObservableObject {
         return exts.contains(url.pathExtension.lowercased())
     }
 
-    /// Build a Track quickly (duration from the audio file; title from filename).
-    /// Real metadata is filled in afterward by `enrichMetadata`.
+    /// Build a Track (duration from the audio file; title from filename). The
+    /// caller fills in real title/artist/album/year from the tags read during
+    /// import (see `ingest`).
     private func makeTrack(from url: URL) -> Track {
         var duration: TimeInterval = 0
         if let file = try? AVAudioFile(forReading: url) {
@@ -325,65 +418,6 @@ final class AppState: ObservableObject {
         }
         let name = url.deletingPathExtension().lastPathComponent
         return Track(url: url, title: name, artist: "", duration: duration)
-    }
-
-    /// Asynchronously read embedded title/artist/album/year tags into the library.
-    private func enrichMetadata(for tracks: [Track]) {
-        for track in tracks {
-            let url = track.url
-            let id = track.id
-            Task.detached {
-                let asset = AVURLAsset(url: url)
-                var title: String?
-                var artist: String?
-                var album: String?
-                var year: Int?
-                if let items = try? await asset.load(.commonMetadata) {
-                    for item in items {
-                        guard let key = item.commonKey else { continue }
-                        let value = try? await item.load(.stringValue)
-                        switch key {
-                        case .commonKeyTitle:     if let v = value, !v.isEmpty { title = v }
-                        case .commonKeyArtist:    if let v = value, !v.isEmpty { artist = v }
-                        case .commonKeyAlbumName: if let v = value, !v.isEmpty { album = v }
-                        case .commonKeyCreationDate:
-                            if let v = value, let y = Self.extractYear(v) { year = y }
-                        default: break
-                        }
-                    }
-                }
-                let fTitle = title, fArtist = artist, fAlbum = album, fYear = year
-                await MainActor.run {
-                    AppState.shared.applyMetadata(id: id, title: fTitle, artist: fArtist,
-                                                  album: fAlbum, year: fYear)
-                }
-            }
-        }
-    }
-
-    /// Pull a 4-digit year out of a metadata date string like "2012-05-01".
-    private nonisolated static func extractYear(_ s: String) -> Int? {
-        let digits = s.prefix(while: { $0 != "-" && $0 != "/" })
-        if digits.count == 4, let y = Int(digits) { return y }
-        // Fallback: first run of 4 consecutive digits.
-        let chars = Array(s)
-        for i in 0...(max(0, chars.count - 4)) where i + 4 <= chars.count {
-            let sub = String(chars[i..<i+4])
-            if sub.allSatisfy({ $0.isNumber }), let y = Int(sub), y > 1900, y < 2200 { return y }
-        }
-        return nil
-    }
-
-    private func applyMetadata(id: Track.ID, title: String?, artist: String?,
-                               album: String?, year: Int?) {
-        var changed = false
-        if let i = library.firstIndex(where: { $0.id == id }) {
-            if let t = title { library[i].title = t; changed = true }
-            if let a = artist { library[i].artist = a; changed = true }
-            if let al = album { library[i].album = al; changed = true }
-            if let y = year { library[i].year = y; changed = true }
-        }
-        if changed { saveLibrary() }
     }
 
     // MARK: - Metadata editing
@@ -454,16 +488,43 @@ final class AppState: ObservableObject {
         saveShow()
     }
 
-    func addToGroup(_ track: Track, groupID: SongGroup.ID) {
-        guard let i = show.groups.firstIndex(where: { $0.id == groupID }) else { return }
-        show.groups[i].tracks.append(track)
+    /// Move a group to a gap position in the rundown. `target` is an insertion
+    /// slot in the original ordering (0 = before the first group, count = after
+    /// the last), as produced by the drop-gaps between cards.
+    func moveGroup(_ id: SongGroup.ID, toIndex target: Int) {
+        guard let from = show.groups.firstIndex(where: { $0.id == id }) else { return }
+        let moved = show.groups.remove(at: from)
+        var insertAt = target
+        if from < target { insertAt -= 1 }          // account for the removal above
+        insertAt = max(0, min(insertAt, show.groups.count))
+        show.groups.insert(moved, at: insertAt)
         saveShow()
     }
 
+    /// Is this song's file already placed somewhere in the current show? Used to
+    /// keep a song to a single appearance per show.
+    func isInShow(_ url: URL) -> Bool {
+        let key = url.standardizedFileURL
+        return show.groups.contains { $0.tracks.contains { $0.url.standardizedFileURL == key } }
+    }
+
+    /// Add a library song to a group, unless that song is already in the show.
+    @discardableResult
+    func addToGroup(_ track: Track, groupID: SongGroup.ID) -> Bool {
+        guard let i = show.groups.firstIndex(where: { $0.id == groupID }) else { return false }
+        guard !isInShow(track.url) else { return false }
+        show.groups[i].tracks.append(track)
+        saveShow()
+        return true
+    }
+
     /// Add to the selected group, creating one if needed.
-    func addToCurrentGroup(_ track: Track) {
+    @discardableResult
+    func addToCurrentGroup(_ track: Track) -> Bool {
+        guard !isInShow(track.url) else { return false }
         if selectedGroupID == nil { newGroup() }
-        if let id = selectedGroupID { addToGroup(track, groupID: id) }
+        if let id = selectedGroupID { return addToGroup(track, groupID: id) }
+        return false
     }
 
     func removeTrack(at offsets: IndexSet, fromGroup groupID: SongGroup.ID) {
@@ -523,8 +584,9 @@ final class AppState: ObservableObject {
 
     // MARK: - Drag & drop
 
-    /// Move/insert a dragged track into a group at a position. Library drags
-    /// create an independent copy (so a song can appear more than once).
+    /// Move/insert a dragged track into a group at a position. A track dragged
+    /// from the library is added once; a song already placed in the show can't be
+    /// added again (drag it between groups to move it instead).
     func handleDrop(_ payload: DragPayload, intoGroup groupID: SongGroup.ID, at index: Int?) {
         var dragged: Track
         if let from = payload.fromGroupID {
@@ -534,6 +596,7 @@ final class AppState: ObservableObject {
             dragged = show.groups[si].tracks.remove(at: ti)
         } else {
             guard let lib = library.first(where: { $0.id == payload.trackID }) else { return }
+            guard !isInShow(lib.url) else { return }
             dragged = lib
             dragged.id = UUID()
         }

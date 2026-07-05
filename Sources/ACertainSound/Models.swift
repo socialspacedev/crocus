@@ -61,6 +61,9 @@ struct Show: Codable, Identifiable {
     /// Sum of every group's playtime, using each song's trimmed length.
     var totalPlaytime: TimeInterval { groups.reduce(0) { $0 + $1.totalDuration } }
 
+    /// Total number of songs across all groups in the rundown.
+    var trackCount: Int { groups.reduce(0) { $0 + $1.tracks.count } }
+
     var formattedDate: String {
         let f = DateFormatter()
         f.dateFormat = "MMMM d, yyyy"

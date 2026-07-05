@@ -28,10 +28,16 @@ struct RundownView: View {
                 emptyState
             } else {
                 ScrollView {
-                    VStack(spacing: 12) {
+                    // Cards are separated by drop-gaps that accept a dragged group
+                    // and insert it at that slot. The gaps are the reorder drop
+                    // targets (kept separate from the draggable cards, which can't
+                    // reliably also be drop targets of the same type).
+                    VStack(spacing: 0) {
                         ForEach(Array(app.show.groups.enumerated()), id: \.element.id) { idx, group in
+                            GroupDropGap(insertIndex: idx)
                             GroupCard(group: group, number: idx + 1)
                         }
+                        GroupDropGap(insertIndex: app.show.groups.count)
                     }
                     .padding(.horizontal, 18)
                     .padding(.bottom, 16)
@@ -65,6 +71,30 @@ struct RundownView: View {
     }
 }
 
+/// A thin slot between group cards that accepts a dragged group and inserts it
+/// here. Provides the visual spacing between cards, and shows an accent line
+/// when a group is hovering over it.
+private struct GroupDropGap: View {
+    @EnvironmentObject var app: AppState
+    let insertIndex: Int
+    @State private var targeted = false
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: 2, style: .continuous)
+            .fill(targeted ? Theme.accent : Color.clear)
+            .frame(height: targeted ? 3 : 2)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 5)
+            .contentShape(Rectangle())
+            .dropDestination(for: GroupDragPayload.self) { items, _ in
+                guard let p = items.first else { return false }
+                app.moveGroup(p.groupID, toIndex: insertIndex)
+                return true
+            } isTargeted: { targeted = $0 }
+            .animation(.easeOut(duration: 0.15), value: targeted)
+    }
+}
+
 private struct GroupCard: View {
     @EnvironmentObject var app: AppState
     @EnvironmentObject var engine: AudioEngine
@@ -72,6 +102,7 @@ private struct GroupCard: View {
     let number: Int
 
     @State private var dropTargeted = false
+    @State private var pulse = false
 
     private var isSelected: Bool { app.selectedGroupID == group.id }
     private var isPlayingThis: Bool { engine.state != .stopped && isSelected }
@@ -79,6 +110,11 @@ private struct GroupCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 10) {
+                Image(systemName: "line.3.horizontal")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(Theme.textTertiary)
+                    .help("Drag the card to reorder this group")
+
                 Button { app.playGroup(group) } label: {
                     Image(systemName: isPlayingThis ? "waveform" : "play.fill")
                         .font(.system(size: 12, weight: .bold))
@@ -134,17 +170,34 @@ private struct GroupCard: View {
         .cardSurface(isSelected ? Theme.surfaceHi : Theme.surface)
         .overlay(
             RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .strokeBorder(dropTargeted ? Theme.accent
+                .strokeBorder(highlighted ? Theme.accent
                               : (isSelected ? Theme.accent.opacity(0.5) : Color.clear),
-                              lineWidth: 1)
+                              lineWidth: highlighted ? 2 : 1)
         )
         .contentShape(Rectangle())
         .onTapGesture { app.resignTextFocus(); app.selectedGroupID = group.id }
+        // The card itself is the group's drag handle (the grip is the visual cue).
+        // Draggable + tap on the same view is the pattern that works for song rows;
+        // song rows stay draggable because the innermost draggable wins.
+        .draggable(GroupDragPayload(groupID: group.id))
+        // Songs dropped onto the card join the group. (Group-reorder drops are
+        // handled one level up, in GroupRow.)
         .dropDestination(for: DragPayload.self) { items, _ in
             for p in items { app.handleDrop(p, intoGroup: group.id, at: nil) }
             return !items.isEmpty
         } isTargeted: { dropTargeted = $0 }
+        // Brief accent pulse when this group gains a song (add confirmation).
+        .onChange(of: group.tracks.count) { old, new in
+            guard new > old else { return }
+            withAnimation(.easeOut(duration: 0.2)) { pulse = true }
+            Task {
+                try? await Task.sleep(nanoseconds: 550_000_000)
+                withAnimation(.easeOut(duration: 0.35)) { pulse = false }
+            }
+        }
     }
+
+    private var highlighted: Bool { dropTargeted || pulse }
 }
 
 private struct TrackRow: View {

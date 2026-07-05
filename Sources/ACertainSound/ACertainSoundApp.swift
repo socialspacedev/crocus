@@ -28,6 +28,7 @@ struct ACertainSoundApp: App {
                     Button("Export CSV…") { app.exportCSV() }
                 }
                 Divider()
+                Button("Clear Library…") { app.clearLibrary() }
                 Button("Clean Unused Media…") { app.cleanUnusedMedia() }
             }
 
