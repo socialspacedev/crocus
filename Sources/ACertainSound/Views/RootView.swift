@@ -58,6 +58,7 @@ struct RootView: View {
         }
         .sheet(isPresented: $app.showArchive) { ShowsArchiveView() }
         .sheet(isPresented: $app.showShortcuts) { ShortcutsView() }
+        .sheet(isPresented: $app.showViewerSheet) { ViewerSheet() }
         .sheet(isPresented: Binding(
             get: { app.editingLibraryTrackID != nil },
             set: { if !$0 { app.editingLibraryTrackID = nil } }
@@ -123,6 +124,14 @@ struct ShowHeaderView: View {
             // Action cluster
             VStack(alignment: .trailing, spacing: 8) {
                 HStack(spacing: 10) {
+                    Button { app.showViewerSheet = true } label: {
+                        Label("Screen", systemImage: app.viewerRunning ? "iphone.radiowaves.left.and.right" : "iphone")
+                            .font(.system(size: 12, weight: .medium))
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(app.viewerRunning ? Theme.accent : Theme.textSecondary)
+                    .help("Second screen for a co-host's phone")
+
                     Button { app.showArchive = true } label: {
                         Label("Shows", systemImage: "clock.arrow.circlepath")
                             .font(.system(size: 12, weight: .medium))

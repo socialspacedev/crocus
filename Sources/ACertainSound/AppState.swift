@@ -25,9 +25,14 @@ final class AppState: ObservableObject {
     @Published var editingLibraryTrackID: Track.ID? = nil
     /// Which track the waveform panel edits when nothing is playing.
     @Published var focusedRef: TrackRef? = nil
+    /// Second-screen web viewer state.
+    @Published var viewerRunning = false
+    @Published var viewerURL: String? = nil
+    @Published var showViewerSheet = false
 
     let engine = AudioEngine()
     let power = PowerManager()
+    let viewer = WebServer()
 
     private let supportDir: URL
     private let showURL: URL
@@ -65,6 +70,53 @@ final class AppState: ObservableObject {
         // level-matching is ready by the time a song plays.
         for t in library { LoudnessStore.shared.ensure(t.url) }
         for t in show.backups.tracks { LoudnessStore.shared.ensure(t.url) }
+
+        // Feed the second-screen viewer (when it's running) as playback changes.
+        engine.objectWillChange
+            .throttle(for: .milliseconds(300), scheduler: RunLoop.main, latest: true)
+            .sink { [weak self] in self?.pushViewerStatus() }
+            .store(in: &cancellables)
+        $show
+            .throttle(for: .milliseconds(300), scheduler: RunLoop.main, latest: true)
+            .sink { [weak self] _ in self?.pushViewerStatus() }
+            .store(in: &cancellables)
+    }
+
+    // MARK: - Second-screen viewer
+
+    func setViewer(_ on: Bool) {
+        if on {
+            viewer.start { [weak self] port in
+                DispatchQueue.main.async {
+                    guard let self else { return }
+                    if let port, let ip = WebServer.localIPAddress() {
+                        self.viewerURL = "http://\(ip):\(port)"
+                        self.viewerRunning = true
+                        self.pushViewerStatus()
+                    } else {
+                        self.viewerRunning = false
+                        self.viewerURL = nil
+                    }
+                }
+            }
+        } else {
+            viewer.stop()
+            viewerRunning = false
+            viewerURL = nil
+        }
+    }
+
+    private func pushViewerStatus() {
+        guard viewerRunning else { return }
+        let st = engine.state == .playing ? "playing" : (engine.state == .paused ? "paused" : "stopped")
+        let status = ViewerStatus(
+            show: show.displayTitle, theme: show.theme, state: st,
+            ducked: engine.isDucked || engine.isFadingToTalk,
+            title: engine.currentTrack?.title, artist: engine.currentTrack?.artist,
+            next: engine.upNextTrack?.displayArtistTitle,
+            remaining: engine.groupRemaining, elapsed: engine.currentElapsed,
+            segDur: engine.currentSegmentDuration)
+        if let d = try? JSONEncoder().encode(status) { viewer.setStatus(d) }
     }
 
     // MARK: - Derived
