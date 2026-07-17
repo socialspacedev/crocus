@@ -212,40 +212,54 @@ private struct LibraryRow: View {
 private struct BackupsShelf: View {
     @EnvironmentObject var app: AppState
     @State private var targeted = false
+    // Collapsed by default so it stays out of the library's way; persisted.
+    @AppStorage("crocus.backupsExpanded") private var expanded = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Divider().overlay(Theme.hairline)
-            HStack(spacing: 6) {
-                Image(systemName: "tray.full")
-                    .font(.system(size: 11))
-                    .foregroundStyle(Theme.textTertiary)
-                SectionLabel("Backups")
-                Spacer()
-                Text("\(app.show.backups.tracks.count)")
-                    .font(Theme.mono(11))
-                    .foregroundStyle(Theme.textTertiary)
-            }
-            .padding(.horizontal, 16)
-            .padding(.top, 10)
-            .padding(.bottom, 6)
 
-            if app.show.backups.tracks.isEmpty {
-                Text("Drag spare songs here for quick filler")
-                    .font(.system(size: 11))
-                    .foregroundStyle(Theme.textTertiary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 12)
-            } else {
-                ScrollView {
-                    VStack(spacing: 2) {
-                        ForEach(app.show.backups.tracks) { BackupRow(track: $0) }
-                    }
-                    .padding(.horizontal, 10)
-                    .padding(.bottom, 10)
+            Button {
+                withAnimation(.easeInOut(duration: 0.2)) { expanded.toggle() }
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: expanded ? "chevron.down" : "chevron.right")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(Theme.textTertiary)
+                    Image(systemName: "tray.full")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Theme.textTertiary)
+                    SectionLabel("Backups")
+                    Spacer()
+                    Text("\(app.show.backups.tracks.count)")
+                        .font(Theme.mono(11))
+                        .foregroundStyle(Theme.textTertiary)
                 }
-                .frame(maxHeight: 132)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 9)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help(expanded ? "Hide backups" : "Show backups")
+
+            if expanded {
+                if app.show.backups.tracks.isEmpty {
+                    Text("Drag spare songs here for quick filler")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Theme.textTertiary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 16)
+                        .padding(.bottom, 12)
+                } else {
+                    ScrollView {
+                        VStack(spacing: 2) {
+                            ForEach(app.show.backups.tracks) { BackupRow(track: $0) }
+                        }
+                        .padding(.horizontal, 10)
+                        .padding(.bottom, 10)
+                    }
+                    .frame(maxHeight: 132)
+                }
             }
         }
         .background(targeted ? Theme.accentSoft : Theme.surface)
@@ -255,7 +269,9 @@ private struct BackupsShelf: View {
         // Finder (fileURL) — SwiftUI won't honour two typed drop targets on one
         // view, and the library-wide file importer would otherwise swallow files.
         .onDrop(of: [UTType.crocusTrack, UTType.fileURL], isTargeted: $targeted) { providers in
-            handleDrop(providers)
+            let handled = handleDrop(providers)
+            if handled { withAnimation(.easeInOut(duration: 0.2)) { expanded = true } }
+            return handled
         }
     }
 
