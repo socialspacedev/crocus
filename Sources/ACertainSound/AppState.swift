@@ -166,6 +166,51 @@ final class AppState: ObservableObject {
         saveShow()
     }
 
+    /// Import audio files dropped from Finder straight onto the Backups shelf:
+    /// bring them into the managed library (reusing an existing copy if present),
+    /// then add each to Backups.
+    func importToBackups(_ urls: [URL]) {
+        let audio = urls.filter { isAudio($0) }
+        guard !audio.isEmpty else { return }
+        Task {
+            for src in audio {
+                _ = src.startAccessingSecurityScopedResource()
+                guard let libTrack = await resolveOrImport(src) else { continue }
+                var backup = libTrack
+                backup.id = UUID()
+                show.backups.tracks.append(backup)
+                LoudnessStore.shared.ensure(backup.url)
+            }
+            saveShow()
+        }
+    }
+
+    /// Find the library track matching a source file (same artist+title, or the
+    /// same managed file), importing it if it's new. Returns nil on failure.
+    private func resolveOrImport(_ src: URL) async -> Track? {
+        let tags = await MetadataIO.readFileTags(src)
+        let title = (tags.title?.isEmpty == false) ? tags.title! : src.deletingPathExtension().lastPathComponent
+        let artist = tags.artist ?? ""
+        let taKey = artistTitleKey(artist: artist, title: title)
+        if let match = library.first(where: { artistTitleKey(artist: $0.artist, title: $0.title) == taKey }) {
+            return match
+        }
+        let dest = copyIntoMedia(src)
+        if let existing = library.first(where: { $0.url.standardizedFileURL == dest.standardizedFileURL }) {
+            return existing
+        }
+        var track = makeTrack(from: dest)
+        track.title = title
+        track.artist = artist
+        if let al = tags.album, !al.isEmpty { track.album = al }
+        track.year = tags.year
+        library.append(track)
+        saveLibrary()
+        ArtworkCache.shared.ensure(track.url)
+        LoudnessStore.shared.ensure(track.url)
+        return track
+    }
+
     func removeBackup(_ track: Track) {
         show.backups.tracks.removeAll { $0.id == track.id }
         saveShow()

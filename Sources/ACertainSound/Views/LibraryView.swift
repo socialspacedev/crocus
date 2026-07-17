@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// The imported song pool. Pick songs here and add them to groups in the rundown.
 struct LibraryView: View {
@@ -250,11 +251,33 @@ private struct BackupsShelf: View {
         .background(targeted ? Theme.accentSoft : Theme.surface)
         .overlay(Rectangle().strokeBorder(Theme.accent, lineWidth: targeted ? 2 : 0)
             .allowsHitTesting(false))
-        .dropDestination(for: DragPayload.self) { items, _ in
-            var added = false
-            for p in items where !p.fromBackups { app.addToBackups(p); added = true }
-            return added
-        } isTargeted: { targeted = $0 }
+        // One handler for BOTH internal song drags (crocusTrack) and files from
+        // Finder (fileURL) — SwiftUI won't honour two typed drop targets on one
+        // view, and the library-wide file importer would otherwise swallow files.
+        .onDrop(of: [UTType.crocusTrack, UTType.fileURL], isTargeted: $targeted) { providers in
+            handleDrop(providers)
+        }
+    }
+
+    private func handleDrop(_ providers: [NSItemProvider]) -> Bool {
+        var handled = false
+        for p in providers {
+            if p.hasItemConformingToTypeIdentifier(UTType.crocusTrack.identifier) {
+                handled = true
+                p.loadDataRepresentation(forTypeIdentifier: UTType.crocusTrack.identifier) { data, _ in
+                    guard let data,
+                          let payload = try? JSONDecoder().decode(DragPayload.self, from: data) else { return }
+                    Task { @MainActor in app.addToBackups(payload) }
+                }
+            } else if p.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {
+                handled = true
+                _ = p.loadObject(ofClass: URL.self) { url, _ in
+                    guard let url else { return }
+                    Task { @MainActor in app.importToBackups([url]) }
+                }
+            }
+        }
+        return handled
     }
 }
 
