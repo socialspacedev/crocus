@@ -15,11 +15,13 @@ struct GroupDragPayload: Codable, Transferable {
     }
 }
 
-/// What gets carried during a drag: the track's id and where it came from
-/// (`nil` group = dragged out of the library).
+/// What gets carried during a drag: the track's id and where it came from.
+/// `fromGroupID == nil && !fromBackups` = the library; `fromBackups` = the
+/// Backups shelf.
 struct DragPayload: Codable, Transferable {
     var trackID: UUID
     var fromGroupID: UUID?
+    var fromBackups: Bool = false
 
     static var transferRepresentation: some TransferRepresentation {
         CodableRepresentation(contentType: .crocusTrack)

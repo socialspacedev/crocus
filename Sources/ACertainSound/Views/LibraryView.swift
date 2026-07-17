@@ -74,6 +74,8 @@ struct LibraryView: View {
                     .padding(.bottom, 12)
                 }
             }
+
+            BackupsShelf()
         }
         .background(Theme.background)
         .overlay(
@@ -175,7 +177,7 @@ private struct LibraryRow: View {
         .draggable(DragPayload(trackID: track.id, fromGroupID: nil))
         .dropDestination(for: DragPayload.self) { items, _ in
             var handled = false
-            for p in items where p.fromGroupID == nil {
+            for p in items where p.fromGroupID == nil && !p.fromBackups {
                 app.reorderLibrary(p, before: track.id); handled = true
             }
             return handled
@@ -194,10 +196,109 @@ private struct LibraryRow: View {
                     app.addToCurrentGroup(track)
                 }
             }
+            Button("Add to Backups") { app.addToBackups(DragPayload(trackID: track.id)) }
             Divider()
             Button("Remove from Library", role: .destructive) {
                 app.removeFromLibrary(track)
             }
         }
+    }
+}
+
+/// Spare songs for filling time, kept in the library area (not the rundown, and
+/// excluded from the show total). Drag songs in; drag a backup out to the player
+/// or a group; or tap to fire it as a one-off.
+private struct BackupsShelf: View {
+    @EnvironmentObject var app: AppState
+    @State private var targeted = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Divider().overlay(Theme.hairline)
+            HStack(spacing: 6) {
+                Image(systemName: "tray.full")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Theme.textTertiary)
+                SectionLabel("Backups")
+                Spacer()
+                Text("\(app.show.backups.tracks.count)")
+                    .font(Theme.mono(11))
+                    .foregroundStyle(Theme.textTertiary)
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 10)
+            .padding(.bottom, 6)
+
+            if app.show.backups.tracks.isEmpty {
+                Text("Drag spare songs here for quick filler")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Theme.textTertiary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 12)
+            } else {
+                ScrollView {
+                    VStack(spacing: 2) {
+                        ForEach(app.show.backups.tracks) { BackupRow(track: $0) }
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.bottom, 10)
+                }
+                .frame(maxHeight: 132)
+            }
+        }
+        .background(targeted ? Theme.accentSoft : Theme.surface)
+        .overlay(Rectangle().strokeBorder(Theme.accent, lineWidth: targeted ? 2 : 0)
+            .allowsHitTesting(false))
+        .dropDestination(for: DragPayload.self) { items, _ in
+            var added = false
+            for p in items where !p.fromBackups { app.addToBackups(p); added = true }
+            return added
+        } isTargeted: { targeted = $0 }
+    }
+}
+
+private struct BackupRow: View {
+    @EnvironmentObject var app: AppState
+    let track: Track
+    @State private var hovering = false
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Button { app.playBackup(track) } label: {
+                Image(systemName: "play.fill")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(Theme.background)
+                    .frame(width: 18, height: 18)
+                    .background(Theme.accent, in: Circle())
+            }
+            .buttonStyle(.plain)
+            .help("Play now (one-off)")
+
+            Text(track.title)
+                .font(.system(size: 12))
+                .foregroundStyle(Theme.textPrimary)
+                .lineLimit(1)
+
+            Spacer(minLength: 4)
+
+            if hovering {
+                Button { app.removeBackup(track) } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(Theme.textTertiary)
+                }
+                .buttonStyle(.plain)
+                .help("Remove from Backups")
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .background(hovering ? Theme.surfaceHi : Color.clear,
+                    in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+        .contentShape(Rectangle())
+        .onHover { hovering = $0 }
+        // Drag a backup into a group or onto the now-playing area.
+        .draggable(DragPayload(trackID: track.id, fromBackups: true))
     }
 }

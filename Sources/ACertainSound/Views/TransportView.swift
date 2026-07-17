@@ -62,7 +62,7 @@ struct TransportView: View {
 
                 Spacer()
 
-                HStack(spacing: 16) {
+                HStack(alignment: .top, spacing: 16) {
                     matchToggle
                     SettingSlider(label: "Crossfade",
                                   value: $app.show.crossfadeDuration, range: 0...12,
@@ -104,17 +104,27 @@ struct TransportView: View {
     }
 
     private var matchToggle: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            SectionLabel("Match")
-            Toggle("", isOn: Binding(
-                get: { app.show.normalizeLoudness },
-                set: { app.show.normalizeLoudness = $0; app.saveShow() }))
-                .labelsHidden()
-                .toggleStyle(.switch)
-                .controlSize(.mini)
-                .tint(Theme.accent)
-                .help("Match song levels across the show (applies from the next song)")
+        VStack(alignment: .leading, spacing: 2) {
+            SectionLabel("Levels")
+            Button {
+                app.show.normalizeLoudness.toggle()
+                app.saveShow()
+            } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: app.show.normalizeLoudness ? "checkmark.circle.fill" : "circle")
+                        .font(.system(size: 11))
+                    Text(app.show.normalizeLoudness ? "Matched" : "Match off")
+                        .font(.system(size: 11, weight: .medium))
+                }
+                .foregroundStyle(app.show.normalizeLoudness ? Theme.background : Theme.textSecondary)
+                .padding(.horizontal, 9)
+                .padding(.vertical, 5)
+                .background(app.show.normalizeLoudness ? Theme.accent : Theme.surfaceHi, in: Capsule())
+            }
+            .buttonStyle(.plain)
+            .help("Match levels: play every song at the same loudness — quiet songs boosted, loud songs eased down, never clipping. Applies from the next song. (Output level works either way.)")
         }
+        .frame(width: 92)
     }
 
     private func banner(_ text: String, icon: String) -> some View {

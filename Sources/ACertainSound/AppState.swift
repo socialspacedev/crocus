@@ -137,15 +137,18 @@ final class AppState: ObservableObject {
                         gains: normGains(for: g.tracks), master: Float(show.masterGain))
     }
 
+    /// Resolve a dragged payload to its Track, from whichever source it came.
+    func resolveDraggedTrack(_ p: DragPayload) -> Track? {
+        if p.fromBackups { return show.backups.tracks.first { $0.id == p.trackID } }
+        if let from = p.fromGroupID {
+            return show.groups.first { $0.id == from }?.tracks.first { $0.id == p.trackID }
+        }
+        return library.first { $0.id == p.trackID }
+    }
+
     /// Play a single dragged song immediately (one-off — doesn't auto-cue next).
     func playSingle(_ payload: DragPayload) {
-        let t: Track?
-        if let from = payload.fromGroupID {
-            t = show.groups.first { $0.id == from }?.tracks.first { $0.id == payload.trackID }
-        } else {
-            t = library.first { $0.id == payload.trackID }
-        }
-        guard let track = t else { return }
+        guard let track = resolveDraggedTrack(payload) else { return }
         engine.playGroup([track], crossfade: 0,
                          fadeToTalk: show.duckTime, duckLevel: Float(show.duckLevel),
                          cueNext: false,
@@ -156,13 +159,7 @@ final class AppState: ObservableObject {
 
     /// Add a dragged song to the Backups shelf (duplicates allowed).
     func addToBackups(_ payload: DragPayload) {
-        let t: Track?
-        if let from = payload.fromGroupID {
-            t = show.groups.first { $0.id == from }?.tracks.first { $0.id == payload.trackID }
-        } else {
-            t = library.first { $0.id == payload.trackID }
-        }
-        guard var track = t else { return }
+        guard payload.fromBackups == false, var track = resolveDraggedTrack(payload) else { return }
         track.id = UUID()
         show.backups.tracks.append(track)
         LoudnessStore.shared.ensure(track.url)
@@ -649,9 +646,10 @@ final class AppState: ObservableObject {
             else { return }
             dragged = show.groups[si].tracks.remove(at: ti)
         } else {
-            guard let lib = library.first(where: { $0.id == payload.trackID }) else { return }
-            guard !isInShow(lib.url) else { return }
-            dragged = lib
+            // From the library or the Backups shelf → copy in (once per show).
+            guard let src = resolveDraggedTrack(payload) else { return }
+            guard !isInShow(src.url) else { return }
+            dragged = src
             dragged.id = UUID()
         }
         guard let di = show.groups.firstIndex(where: { $0.id == groupID }) else { return }
