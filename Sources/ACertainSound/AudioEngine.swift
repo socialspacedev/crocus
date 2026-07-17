@@ -31,15 +31,10 @@ final class AudioEngine: ObservableObject {
     private let engine = AVAudioEngine()
     private let deckA = AVAudioPlayerNode()
     private let deckB = AVAudioPlayerNode()
-    // A per-deck gain stage (in dB) that carries loudness-match + master gain,
-    // separate from the player volume (which does crossfade / ducking).
-    private let eqA = AVAudioUnitEQ(numberOfBands: 0)
-    private let eqB = AVAudioUnitEQ(numberOfBands: 0)
 
-    /// Per-track loudness-match gains (linear), parallel to `queue`.
+    /// Per-track loudness-match gains (linear), parallel to `queue`. Applied by
+    /// scaling the audio samples at load time (so quiet songs can be boosted).
     private var trackGains: [Float] = []
-    /// Master output gain (linear), applied on top of every track.
-    private var masterGain: Float = 1
 
     /// Called when a group finishes playing naturally (not on manual stop).
     var onGroupFinished: (() -> Void)?
@@ -72,34 +67,20 @@ final class AudioEngine: ObservableObject {
     init() {
         engine.attach(deckA)
         engine.attach(deckB)
-        engine.attach(eqA)
-        engine.attach(eqB)
         let fmt = AVAudioFormat(standardFormatWithSampleRate: 44_100, channels: 2)
-        engine.connect(deckA, to: eqA, format: fmt)
-        engine.connect(eqA, to: engine.mainMixerNode, format: fmt)
-        engine.connect(deckB, to: eqB, format: fmt)
-        engine.connect(eqB, to: engine.mainMixerNode, format: fmt)
+        engine.connect(deckA, to: engine.mainMixerNode, format: fmt)
+        engine.connect(deckB, to: engine.mainMixerNode, format: fmt)
         engine.prepare()
     }
 
-    private func eq(for deck: AVAudioPlayerNode) -> AVAudioUnitEQ { deck === deckA ? eqA : eqB }
-
-    /// Combined per-track gain (loudness match × master) for a queue index.
+    /// Per-track loudness gain (linear) for a queue index.
     private func gainForIndex(_ i: Int) -> Float {
-        let base = (i >= 0 && i < trackGains.count) ? trackGains[i] : 1
-        return base * masterGain
+        (i >= 0 && i < trackGains.count) ? trackGains[i] : 1
     }
 
-    /// Convert a linear gain to the EQ's dB, clamped to its valid range.
-    private func dbGain(_ linear: Float) -> Float {
-        min(24, max(-96, 20 * log10(max(0.0001, linear))))
-    }
-
-    /// Re-apply the gain stages after the master level changes live.
+    /// Live master output level (0...1), applied on the main mixer.
     func setMasterGain(_ linear: Float) {
-        masterGain = max(0.05, linear)
-        eq(for: activeDeck).globalGain = dbGain(gainForIndex(index))
-        if isCrossfading { eq(for: idleDeck).globalGain = dbGain(gainForIndex(index + 1)) }
+        engine.mainMixerNode.outputVolume = max(0, min(1, linear))
     }
 
     // MARK: - Public transport
@@ -134,7 +115,7 @@ final class AudioEngine: ObservableObject {
         queue = tracks
         index = 0
         trackGains = gains
-        masterGain = max(0.05, master)
+        engine.mainMixerNode.outputVolume = max(0, min(1, master))
         crossfadeDuration = max(0, crossfade)
         fadeToTalkDuration = max(1, fadeToTalk)
         self.duckLevel = min(0.95, max(0.05, duckLevel))
@@ -297,16 +278,27 @@ final class AudioEngine: ObservableObject {
             let endSec = track.trimEnd ?? (Double(total) / sr)
             let endFrame = min(total, AVAudioFramePosition((endSec * sr).rounded()))
             let count = AVAudioFrameCount(max(0, endFrame - startFrame))
-            guard count > 0 else { return nil }
-            // Reconnect deck → its EQ → mixer at the file's format (we only ever
-            // reconnect a stopped deck), and set the loudness/master gain stage.
-            let node = eq(for: deck)
-            engine.connect(deck, to: node, format: fmt)
-            engine.connect(node, to: engine.mainMixerNode, format: fmt)
-            node.globalGain = dbGain(gain)
-            deck.scheduleSegment(file, startingFrame: startFrame,
-                                 frameCount: count, at: nil, completionHandler: nil)
-            return Double(count) / sr
+            guard count > 0, let buffer = AVAudioPCMBuffer(pcmFormat: fmt, frameCapacity: count)
+            else { return nil }
+
+            // Read the trimmed segment into memory so we can scale its samples
+            // for loudness matching (a boost > 1 isn't possible via node volume).
+            file.framePosition = startFrame
+            try file.read(into: buffer, frameCount: count)
+            if abs(gain - 1) > 0.001, let channels = buffer.floatChannelData {
+                let frames = Int(buffer.frameLength)
+                for c in 0..<Int(fmt.channelCount) {
+                    let p = channels[c]
+                    var i = 0
+                    while i < frames { p[i] *= gain; i += 1 }
+                }
+            }
+
+            // Direct deck → mixer (the mixer resamples any file format safely).
+            // Only ever reconnects a stopped deck.
+            engine.connect(deck, to: engine.mainMixerNode, format: fmt)
+            deck.scheduleBuffer(buffer, at: nil, options: [], completionHandler: nil)
+            return Double(buffer.frameLength) / sr
         } catch {
             lastError = "Couldn't load \(track.url.lastPathComponent): \(error.localizedDescription)"
             return nil

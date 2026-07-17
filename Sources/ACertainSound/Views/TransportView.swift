@@ -80,8 +80,8 @@ struct TransportView: View {
                         app.saveShow()
                     }
                     SettingSlider(label: "Output",
-                                  value: masterBinding, range: 50...200,
-                                  display: "\(Int(app.show.masterGain * 100))%") {
+                                  value: masterBinding, range: 10...100,
+                                  display: "\(Int(min(1, app.show.masterGain) * 100))%") {
                         app.saveShow()
                     }
                 }
