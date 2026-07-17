@@ -55,6 +55,12 @@ struct Show: Codable, Identifiable {
     var duckTime: TimeInterval = 8
     /// Level the music sits at under a voiceover (0–1). ~0.45 = clearly audible bed.
     var duckLevel: Double = 0.45
+    /// Match song levels across the show (loudness normalisation).
+    var normalizeLoudness: Bool = true
+    /// Master output gain (1.0 = unity; >1 drives the feed into the desk hotter).
+    var masterGain: Double = 1.0
+    /// Spare songs kept aside from the rundown — excluded from the show total.
+    var backups: SongGroup = SongGroup(name: "Backups")
 
     var displayTitle: String { "\(name) #\(number)" }
 
@@ -110,6 +116,7 @@ extension SongGroup {
 extension Show {
     enum CodingKeys: String, CodingKey {
         case id, name, number, date, theme, groups, crossfadeDuration, duckTime, duckLevel
+        case normalizeLoudness, masterGain, backups
     }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -122,6 +129,9 @@ extension Show {
         crossfadeDuration = try c.decodeIfPresent(TimeInterval.self, forKey: .crossfadeDuration) ?? 3
         duckTime = try c.decodeIfPresent(TimeInterval.self, forKey: .duckTime) ?? 8
         duckLevel = try c.decodeIfPresent(Double.self, forKey: .duckLevel) ?? 0.45
+        normalizeLoudness = try c.decodeIfPresent(Bool.self, forKey: .normalizeLoudness) ?? true
+        masterGain = try c.decodeIfPresent(Double.self, forKey: .masterGain) ?? 1.0
+        backups = try c.decodeIfPresent(SongGroup.self, forKey: .backups) ?? SongGroup(name: "Backups")
     }
 }
 

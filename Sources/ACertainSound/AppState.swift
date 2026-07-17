@@ -60,6 +60,11 @@ final class AppState: ObservableObject {
 
         // When a group finishes on its own, cue the next group paused.
         engine.onGroupFinished = { [weak self] in self?.cueNextGroupPaused() }
+
+        // Measure loudness for the existing library in the background so
+        // level-matching is ready by the time a song plays.
+        for t in library { LoudnessStore.shared.ensure(t.url) }
+        for t in show.backups.tracks { LoudnessStore.shared.ensure(t.url) }
     }
 
     // MARK: - Derived
@@ -85,7 +90,20 @@ final class AppState: ObservableObject {
         engine.playGroup(g.tracks,
                          crossfade: show.crossfadeDuration,
                          fadeToTalk: show.duckTime,
-                         duckLevel: Float(show.duckLevel))
+                         duckLevel: Float(show.duckLevel),
+                         gains: normGains(for: g.tracks),
+                         master: Float(show.masterGain))
+    }
+
+    /// Loudness-match gains (linear) for a set of tracks, honouring the toggle.
+    private func normGains(for tracks: [Track]) -> [Float] {
+        tracks.map { LoudnessStore.shared.gain(for: $0.url, enabled: show.normalizeLoudness) }
+    }
+
+    /// Live master output level (drives the desk feed). Applies immediately.
+    func setMasterGain(_ v: Double) {
+        show.masterGain = v
+        engine.setMasterGain(Float(v))
     }
 
     func playGroup(_ group: SongGroup) {
@@ -115,7 +133,8 @@ final class AppState: ObservableObject {
         focusedRef = nil
         guard !g.tracks.isEmpty else { return }
         engine.cueGroup(g.tracks, crossfade: show.crossfadeDuration,
-                        fadeToTalk: show.duckTime, duckLevel: Float(show.duckLevel))
+                        fadeToTalk: show.duckTime, duckLevel: Float(show.duckLevel),
+                        gains: normGains(for: g.tracks), master: Float(show.masterGain))
     }
 
     /// Play a single dragged song immediately (one-off — doesn't auto-cue next).
@@ -129,7 +148,39 @@ final class AppState: ObservableObject {
         guard let track = t else { return }
         engine.playGroup([track], crossfade: 0,
                          fadeToTalk: show.duckTime, duckLevel: Float(show.duckLevel),
-                         cueNext: false)
+                         cueNext: false,
+                         gains: normGains(for: [track]), master: Float(show.masterGain))
+    }
+
+    // MARK: - Backups (spare songs for filling time, kept out of the rundown)
+
+    /// Add a dragged song to the Backups shelf (duplicates allowed).
+    func addToBackups(_ payload: DragPayload) {
+        let t: Track?
+        if let from = payload.fromGroupID {
+            t = show.groups.first { $0.id == from }?.tracks.first { $0.id == payload.trackID }
+        } else {
+            t = library.first { $0.id == payload.trackID }
+        }
+        guard var track = t else { return }
+        track.id = UUID()
+        show.backups.tracks.append(track)
+        LoudnessStore.shared.ensure(track.url)
+        saveShow()
+    }
+
+    func removeBackup(_ track: Track) {
+        show.backups.tracks.removeAll { $0.id == track.id }
+        saveShow()
+    }
+
+    /// Fire a backup song immediately as a one-off (doesn't disturb the rundown).
+    func playBackup(_ track: Track) {
+        resignTextFocus()
+        engine.playGroup([track], crossfade: 0,
+                         fadeToTalk: show.duckTime, duckLevel: Float(show.duckLevel),
+                         cueNext: false,
+                         gains: normGains(for: [track]), master: Float(show.masterGain))
     }
 
     /// Jump the currently-playing song's audio to its (edited) start marker.
@@ -238,7 +289,10 @@ final class AppState: ObservableObject {
         if !newTracks.isEmpty {
             library.append(contentsOf: newTracks)
             saveLibrary()
-            for t in newTracks { ArtworkCache.shared.ensure(t.url) }
+            for t in newTracks {
+                ArtworkCache.shared.ensure(t.url)
+                LoudnessStore.shared.ensure(t.url)
+            }
         }
         if skipped > 0 {
             infoAlert("Skipped duplicates",

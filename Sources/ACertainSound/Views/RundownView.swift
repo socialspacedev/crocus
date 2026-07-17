@@ -54,6 +54,8 @@ struct RundownView: View {
                     }
                 }
             }
+
+            BackupsBar()
         }
         .background(Theme.background)
     }
@@ -79,6 +81,87 @@ struct RundownView: View {
             Spacer()
         }
         .frame(maxWidth: .infinity)
+    }
+}
+
+/// Always-visible shelf of spare songs for filling time in a hurry. Drop songs
+/// in from the library or rundown; tap one to play it immediately as a one-off.
+/// Kept out of the rundown and excluded from the show total.
+private struct BackupsBar: View {
+    @EnvironmentObject var app: AppState
+    @State private var targeted = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Divider().overlay(Theme.hairline)
+            HStack(spacing: 10) {
+                HStack(spacing: 5) {
+                    Image(systemName: "tray.full")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Theme.textTertiary)
+                    SectionLabel("Backups")
+                }
+                if app.show.backups.tracks.isEmpty {
+                    Text("Drag spare songs here for quick filler")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Theme.textTertiary)
+                    Spacer(minLength: 0)
+                } else {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 8) {
+                            ForEach(app.show.backups.tracks) { BackupChip(track: $0) }
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal, 18)
+            .padding(.vertical, 10)
+        }
+        .background(targeted ? Theme.accentSoft : Theme.surface)
+        .overlay(Rectangle().strokeBorder(Theme.accent, lineWidth: targeted ? 2 : 0)
+            .allowsHitTesting(false))
+        .dropDestination(for: DragPayload.self) { items, _ in
+            for p in items { app.addToBackups(p) }
+            return !items.isEmpty
+        } isTargeted: { targeted = $0 }
+    }
+}
+
+private struct BackupChip: View {
+    @EnvironmentObject var app: AppState
+    let track: Track
+    @State private var hovering = false
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Button { app.playBackup(track) } label: {
+                Image(systemName: "play.fill")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(Theme.background)
+                    .frame(width: 18, height: 18)
+                    .background(Theme.accent, in: Circle())
+            }
+            .buttonStyle(.plain)
+            .help("Play now")
+
+            Text(track.title)
+                .font(.system(size: 12))
+                .foregroundStyle(Theme.textPrimary)
+                .lineLimit(1)
+                .frame(maxWidth: 150, alignment: .leading)
+
+            Button { app.removeBackup(track) } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 8, weight: .semibold))
+                    .foregroundStyle(Theme.textTertiary)
+            }
+            .buttonStyle(.plain)
+            .opacity(hovering ? 1 : 0.35)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .background(Theme.surfaceHi, in: Capsule())
+        .onHover { hovering = $0 }
     }
 }
 

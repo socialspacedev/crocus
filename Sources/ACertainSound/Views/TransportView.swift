@@ -62,7 +62,8 @@ struct TransportView: View {
 
                 Spacer()
 
-                HStack(spacing: 20) {
+                HStack(spacing: 16) {
+                    matchToggle
                     SettingSlider(label: "Crossfade",
                                   value: $app.show.crossfadeDuration, range: 0...12,
                                   display: app.show.crossfadeDuration == 0 ? "off" : "\(Int(app.show.crossfadeDuration))s") {
@@ -78,6 +79,11 @@ struct TransportView: View {
                                   display: "\(Int(app.show.duckLevel * 100))%") {
                         app.saveShow()
                     }
+                    SettingSlider(label: "Output",
+                                  value: masterBinding, range: 50...200,
+                                  display: "\(Int(app.show.masterGain * 100))%") {
+                        app.saveShow()
+                    }
                 }
             }
             .padding(.horizontal, 24)
@@ -89,6 +95,26 @@ struct TransportView: View {
     private var bedLevelBinding: Binding<Double> {
         Binding(get: { app.show.duckLevel * 100 },
                 set: { app.show.duckLevel = $0 / 100 })
+    }
+
+    // Master output level — updates the live feed as you drag.
+    private var masterBinding: Binding<Double> {
+        Binding(get: { app.show.masterGain * 100 },
+                set: { app.setMasterGain($0 / 100) })
+    }
+
+    private var matchToggle: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            SectionLabel("Match")
+            Toggle("", isOn: Binding(
+                get: { app.show.normalizeLoudness },
+                set: { app.show.normalizeLoudness = $0; app.saveShow() }))
+                .labelsHidden()
+                .toggleStyle(.switch)
+                .controlSize(.mini)
+                .tint(Theme.accent)
+                .help("Match song levels across the show (applies from the next song)")
+        }
     }
 
     private func banner(_ text: String, icon: String) -> some View {
@@ -149,6 +175,6 @@ private struct SettingSlider: View {
             .controlSize(.small)
             .tint(Theme.accent)
         }
-        .frame(width: 120)
+        .frame(width: 106)
     }
 }
