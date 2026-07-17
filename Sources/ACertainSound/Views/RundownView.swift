@@ -27,20 +27,31 @@ struct RundownView: View {
             if app.show.groups.isEmpty {
                 emptyState
             } else {
-                ScrollView {
-                    // Cards are separated by drop-gaps that accept a dragged group
-                    // and insert it at that slot. The gaps are the reorder drop
-                    // targets (kept separate from the draggable cards, which can't
-                    // reliably also be drop targets of the same type).
-                    VStack(spacing: 0) {
-                        ForEach(Array(app.show.groups.enumerated()), id: \.element.id) { idx, group in
-                            GroupDropGap(insertIndex: idx)
-                            GroupCard(group: group, number: idx + 1)
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        // Cards are separated by drop-gaps that accept a dragged group
+                        // and insert it at that slot. The gaps are the reorder drop
+                        // targets (kept separate from the draggable cards, which can't
+                        // reliably also be drop targets of the same type).
+                        VStack(spacing: 0) {
+                            ForEach(Array(app.show.groups.enumerated()), id: \.element.id) { idx, group in
+                                GroupDropGap(insertIndex: idx)
+                                GroupCard(group: group, number: idx + 1)
+                                    .id(group.id)
+                            }
+                            GroupDropGap(insertIndex: app.show.groups.count)
                         }
-                        GroupDropGap(insertIndex: app.show.groups.count)
+                        .padding(.horizontal, 18)
+                        .padding(.bottom, 16)
                     }
-                    .padding(.horizontal, 18)
-                    .padding(.bottom, 16)
+                    // Follow playback: keep the current/next group in view as the
+                    // show advances (and when you select a group by hand).
+                    .onChange(of: app.selectedGroupID) { _, newID in
+                        guard let id = newID else { return }
+                        withAnimation(.easeInOut(duration: 0.35)) {
+                            proxy.scrollTo(id, anchor: .center)
+                        }
+                    }
                 }
             }
         }
