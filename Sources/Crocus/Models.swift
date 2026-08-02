@@ -57,8 +57,10 @@ struct Show: Codable, Identifiable {
     var duckLevel: Double = 0.45
     /// Match song levels across the show (loudness normalisation).
     var normalizeLoudness: Bool = true
-    /// Master output gain (1.0 = unity; >1 drives the feed into the desk hotter).
-    var masterGain: Double = 1.0
+    /// Master output gain. 1.0 is unity and the ceiling — the fader can only trim
+    /// the feed, never boost past it — so new shows start a couple of dB below,
+    /// leaving somewhere to go when the room wants more.
+    var masterGain: Double = 0.8
     /// Spare songs kept aside from the rundown — excluded from the show total.
     var backups: SongGroup = SongGroup(name: "Backups")
 
@@ -130,6 +132,8 @@ extension Show {
         duckTime = try c.decodeIfPresent(TimeInterval.self, forKey: .duckTime) ?? 8
         duckLevel = try c.decodeIfPresent(Double.self, forKey: .duckLevel) ?? 0.45
         normalizeLoudness = try c.decodeIfPresent(Bool.self, forKey: .normalizeLoudness) ?? true
+        // Shows saved before there was an Output fader played at unity — keep them
+        // there rather than quietly pulling an archived episode down.
         masterGain = try c.decodeIfPresent(Double.self, forKey: .masterGain) ?? 1.0
         backups = try c.decodeIfPresent(SongGroup.self, forKey: .backups) ?? SongGroup(name: "Backups")
     }

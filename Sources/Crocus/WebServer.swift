@@ -124,7 +124,7 @@ final class WebServer {
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <title>Crocus</title>
     <style>
-      :root { --bg:#0B0E0C; --fg:#EDF2ED; --dim:#8AA090; --accent:#66CC85; }
+      :root { --bg:#0B0E0C; --fg:#EDF2ED; --dim:#8AA090; --accent:#66CC85; --alert:#ED594F; }
       * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
       html,body { margin:0; height:100%; background:var(--bg); color:var(--fg);
         font-family:-apple-system,system-ui,sans-serif; -webkit-user-select:none; user-select:none; }
@@ -144,7 +144,8 @@ final class WebServer {
       .count .label { color:var(--dim); }
       .big { font-variant-numeric:tabular-nums; font-weight:200; font-size:clamp(64px,26vw,180px); line-height:1;
         letter-spacing:-2px; }
-      .big.warn { color:var(--accent); }
+      .big.warn { color:var(--alert); animation:flash 1.7s ease-in-out infinite; }
+      @keyframes flash { 0%,100% { opacity:1; } 50% { opacity:.5; } }
       .next { font-size:15px; color:var(--dim); margin-top:14px; min-height:20px; overflow:hidden;
         text-overflow:ellipsis; white-space:nowrap; }
       .off .title { color:var(--dim); }

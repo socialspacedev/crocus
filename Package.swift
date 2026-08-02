@@ -2,7 +2,7 @@
 import PackageDescription
 
 let package = Package(
-    name: "ACertainSound",
+    name: "Crocus",
     platforms: [
         .macOS(.v14)
     ],
@@ -14,11 +14,11 @@ let package = Package(
     ],
     targets: [
         .executableTarget(
-            name: "ACertainSound",
+            name: "Crocus",
             dependencies: [
                 .product(name: "ID3TagEditor", package: "ID3TagEditor")
             ],
-            path: "Sources/ACertainSound",
+            path: "Sources/Crocus",
             swiftSettings: [
                 // Use the Swift 5 language mode to avoid strict-concurrency friction
                 // with AVFoundation completion handlers during early development.

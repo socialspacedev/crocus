@@ -69,6 +69,7 @@ struct NowPlayingView: View {
                 Text(TimeFmt.clock(engine.groupRemaining))
                     .font(Theme.mono(60, .light))
                     .foregroundStyle(countdownColor)
+                    .opacity(flashOpacity)
                     .contentTransition(.numericText())
                 if engine.currentSegmentDuration > 0 {
                     Text("track \(TimeFmt.clock(engine.currentElapsed)) / \(TimeFmt.clock(engine.currentSegmentDuration))")
@@ -125,9 +126,25 @@ struct NowPlayingView: View {
         (engine.isDucked || engine.isFadingToTalk) ? "Bed ends in" : "Music stops in"
     }
 
+    /// The last ten seconds of music — get ready to talk.
+    private var inFinalTen: Bool {
+        isLive && !engine.isDucked && !engine.isFadingToTalk
+            && engine.groupRemaining > 0 && engine.groupRemaining <= 10
+    }
+
     private var countdownColor: Color {
         if engine.isDucked || engine.isFadingToTalk { return Theme.accent }
-        if isLive && engine.groupRemaining <= 10 { return Theme.accent }
+        if inFinalTen { return Theme.alert }
         return isLive ? Theme.textPrimary : Theme.textTertiary
+    }
+
+    /// A slow breathe rather than a blink: one cycle every 1.7s, easing between
+    /// full and half brightness instead of snapping. Red already carries the
+    /// message — the pulse is only there to catch your eye. Never blanks, so the
+    /// number stays readable the whole way down.
+    private var flashOpacity: Double {
+        guard inFinalTen else { return 1 }
+        let phase = engine.groupRemaining.truncatingRemainder(dividingBy: 1.7) / 1.7
+        return 0.75 + 0.25 * cos(2 * .pi * phase)
     }
 }

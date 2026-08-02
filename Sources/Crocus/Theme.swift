@@ -18,6 +18,11 @@ enum Theme {
     static let accent     = Color(red: 0.40, green: 0.80, blue: 0.52)       // #66CC85
     static let accentSoft = Color(red: 0.40, green: 0.80, blue: 0.52).opacity(0.14)
 
+    // Meter zones / last-ten-seconds warning. The only non-green in the console,
+    // so they read instantly from across the room.
+    static let warning = Color(red: 0.95, green: 0.78, blue: 0.35)          // #F2C759
+    static let alert   = Color(red: 0.93, green: 0.35, blue: 0.31)          // #ED594F
+
     // Hairlines — faintly green.
     static let hairline = Color(red: 0.55, green: 0.95, blue: 0.65).opacity(0.07)
 

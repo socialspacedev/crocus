@@ -1,7 +1,7 @@
 import SwiftUI
 
 @main
-struct ACertainSoundApp: App {
+struct CrocusApp: App {
     @StateObject private var app = AppState.shared
 
     var body: some Scene {

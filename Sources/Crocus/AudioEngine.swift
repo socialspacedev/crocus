@@ -1,6 +1,36 @@
 import Foundation
 import AVFoundation
+import Accelerate
 import Combine
+
+/// Hands measured levels from the audio render thread to the UI clock.
+///
+/// Accumulates energy rather than a running maximum, so draining gives a true
+/// time-weighted RMS over the window however many buffers landed in it. The tap
+/// delivers on its own schedule — often slower than the UI clock — so a window
+/// with no audio in it returns nil, meaning "nothing new", *not* "silence". A
+/// reader that treated those as zero would drag the meter down between buffers.
+private final class LevelTapBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var sumSquares: Double = 0
+    private var frames: Double = 0
+
+    func submit(meanSquare: Float, frames n: Int) {
+        lock.lock()
+        sumSquares += Double(meanSquare) * Double(n)
+        frames += Double(n)
+        lock.unlock()
+    }
+
+    /// RMS across everything submitted since the previous call, or nil if no
+    /// audio arrived. Resets the accumulator.
+    func drain() -> Float? {
+        lock.lock()
+        defer { sumSquares = 0; frames = 0; lock.unlock() }
+        guard frames > 0 else { return nil }
+        return Float((sumSquares / frames).squareRoot())
+    }
+}
 
 /// The core playback engine. Two player nodes ("decks") feed the main mixer,
 /// which lets us crossfade between consecutive songs and run a slow manual
@@ -27,6 +57,12 @@ final class AudioEngine: ObservableObject {
     @Published private(set) var isDucked = false
     /// Surfaced to the UI if a file fails to load mid-show, without crashing.
     @Published private(set) var lastError: String?
+
+    /// Output meter, 0...1 on a -50…0 dB scale, already including the Output
+    /// fader — what's actually leaving the app. A single mono reading, averaged
+    /// the way a VU needle averages, plus a slow peak-hold marker.
+    @Published private(set) var meterLevel: Float = 0
+    @Published private(set) var meterPeak: Float = 0
 
     private let engine = AVAudioEngine()
     private let deckA = AVAudioPlayerNode()
@@ -57,6 +93,13 @@ final class AudioEngine: ObservableObject {
     private var activeSegmentStart: TimeInterval = 0
     private var activeSegmentScheduledDuration: TimeInterval = 0
 
+    private let levelTap = LevelTapBox()
+    /// The Output fader, mirrored so the meter can divide it back out — measured:
+    /// a tap on the main mixer reads *after* `outputVolume` is applied.
+    private var masterGain: Float = 1
+    private var meterTarget: Float = 0
+    private var peakHoldTicks = 0
+
     private var timer: Timer?
     private var crossfadeStartElapsed: TimeInterval?
     private var fadeStart: Date?
@@ -70,7 +113,33 @@ final class AudioEngine: ObservableObject {
         let fmt = AVAudioFormat(standardFormatWithSampleRate: 44_100, channels: 2)
         engine.connect(deckA, to: engine.mainMixerNode, format: fmt)
         engine.connect(deckB, to: engine.mainMixerNode, format: fmt)
+        installMeterTap()
         engine.prepare()
+    }
+
+    /// Watch the post-mix signal so the meter shows both decks, the crossfade and
+    /// any voiceover duck — everything except the Output fader, which is folded in
+    /// on the UI side.
+    ///
+    /// Measures RMS across the channels rather than sample peak: peak jumps around
+    /// on every snare hit, where RMS is the energy in the buffer — much closer to
+    /// what the ear (and a VU needle) actually follows.
+    private func installMeterTap() {
+        let mixer = engine.mainMixerNode
+        mixer.installTap(onBus: 0, bufferSize: 1024, format: nil) { [levelTap] buffer, _ in
+            guard let channels = buffer.floatChannelData else { return }
+            let frames = vDSP_Length(buffer.frameLength)
+            guard frames > 0 else { return }
+            let channelCount = max(1, Int(buffer.format.channelCount))
+            var sumMeanSquare: Float = 0
+            for c in 0..<channelCount {
+                var meanSquare: Float = 0
+                vDSP_measqv(channels[c], 1, &meanSquare, frames)
+                sumMeanSquare += meanSquare
+            }
+            levelTap.submit(meanSquare: sumMeanSquare / Float(channelCount),
+                            frames: Int(buffer.frameLength))
+        }
     }
 
     /// Per-track loudness gain (linear) for a queue index.
@@ -80,6 +149,7 @@ final class AudioEngine: ObservableObject {
 
     /// Live master output level (0...1), applied on the main mixer.
     func setMasterGain(_ linear: Float) {
+        masterGain = max(0.05, min(1, linear))
         engine.mainMixerNode.outputVolume = max(0, min(1, linear))
     }
 
@@ -115,7 +185,7 @@ final class AudioEngine: ObservableObject {
         queue = tracks
         index = 0
         trackGains = gains
-        engine.mainMixerNode.outputVolume = max(0, min(1, master))
+        setMasterGain(master)
         crossfadeDuration = max(0, crossfade)
         fadeToTalkDuration = max(1, fadeToTalk)
         self.duckLevel = min(0.95, max(0.05, duckLevel))
@@ -251,6 +321,7 @@ final class AudioEngine: ObservableObject {
         fadeTarget = 1
         queue = []
         index = 0
+        resetMeters()
     }
 
     // MARK: - Engine helpers
@@ -324,6 +395,7 @@ final class AudioEngine: ObservableObject {
     // MARK: - The clock (drives crossfade, fade-to-talk, countdown, auto-stop)
 
     private func tick() {
+        updateMeters()
         guard state == .playing else { return }
         let e = elapsed(activeDeck)
         currentElapsed = e
@@ -359,6 +431,60 @@ final class AudioEngine: ObservableObject {
         } else if remaining <= 0 {
             if hasNext { hardAdvance() } else { endOfGroup() }
         }
+    }
+
+    // MARK: - Output meter
+
+    /// Ease onto the reading and fall away slowly — a needle that swings, not a
+    /// bar that strobes. Rise is quicker than fall so the meter still answers a
+    /// song coming in, but neither is instant.
+    private func updateMeters() {
+        // The tap reads post-fader, but the fader is already drawn as the meter's
+        // ceiling — so divide it back out and meter the programme itself, or the
+        // fader would shorten the bar twice over.
+        //
+        // No new audio just means the tap hasn't delivered yet (it hands over ~100ms
+        // at a time, slower than this clock) — hold the last reading and keep easing
+        // toward it, rather than reading the gap as silence.
+        if let rms = levelTap.drain() { meterTarget = meterScale(rms / masterGain) }
+        if state != .playing { meterTarget = 0 }
+
+        let coefficient: Float = meterTarget > meterLevel ? 0.18 : 0.07
+        meterLevel += (meterTarget - meterLevel) * coefficient
+        if meterLevel < 0.002 { meterLevel = 0 }
+
+        // Peak marker: re-arm on a new high, sit still for ~1.5s, then slide down.
+        if meterLevel >= meterPeak {
+            meterPeak = meterLevel
+            peakHoldTicks = 50
+        } else if peakHoldTicks > 0 {
+            peakHoldTicks -= 1
+        } else {
+            meterPeak = max(meterLevel, meterPeak - 0.008)
+        }
+    }
+
+    /// RMS amplitude → bar position, on a scale chosen to suit the programme
+    /// rather than the theoretical range of the format. The floor is well below
+    /// anything you'd broadcast, and the top sits a little above the loudest
+    /// material, so a song matched to `LoudnessStore.targetDB` sits about
+    /// three-quarters of the way to the fader cap — room to see it move both ways.
+    private static let meterFloorDB: Float = -42
+    private static let meterTopDB: Float = -12
+
+    private func meterScale(_ amplitude: Float) -> Float {
+        guard amplitude > 0.003 else { return 0 }
+        let db = 20 * log10(min(1, amplitude))
+        let span = Self.meterTopDB - Self.meterFloorDB
+        return max(0, min(1, (db - Self.meterFloorDB) / span))
+    }
+
+    private func resetMeters() {
+        meterLevel = 0
+        meterPeak = 0
+        meterTarget = 0
+        peakHoldTicks = 0
+        _ = levelTap.drain()
     }
 
     /// The group finished playing on its own — go silent, then let AppState cue

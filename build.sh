@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# Build "A Certain Sound" into a double-clickable .app bundle.
+# Build Crocus into a double-clickable .app bundle.
 #
 #   ./build.sh          # fast debug build, then launch
 #   ./build.sh release  # optimized build for everyday use
@@ -17,7 +17,7 @@ APP="dist/${APP_NAME}.app"
 echo "▶ Building ($CONFIG)…"
 swift build -c "$CONFIG"
 
-BIN=".build/${CONFIG}/ACertainSound"
+BIN=".build/${CONFIG}/Crocus"
 [ -f "$BIN" ] || { echo "✗ Build product not found at $BIN"; exit 1; }
 
 echo "▶ Assembling ${APP}…"

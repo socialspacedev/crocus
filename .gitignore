@@ -14,3 +14,6 @@
 *.xcodeproj/xcuserdata/
 *.xcworkspace/xcuserdata/
 DerivedData/
+
+# Claude Code — shared project settings are tracked; local overrides are not
+.claude/settings.local.json
