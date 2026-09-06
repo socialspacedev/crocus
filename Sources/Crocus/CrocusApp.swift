@@ -10,10 +10,14 @@ struct CrocusApp: App {
                 .environmentObject(app)
                 .environmentObject(app.engine)
                 .environmentObject(app.power)
-                .frame(minWidth: 960, minHeight: 640)
+                // The transport bar is a fixed-width console — five faders, the
+                // match toggle and the transport cluster all sit at their natural
+                // size — so the window can't go narrower than that row needs
+                // without clipping the Output fader off the right-hand edge.
+                .frame(minWidth: 1240, minHeight: 640)
                 .preferredColorScheme(.dark)
         }
-        .defaultSize(width: 1120, height: 760)
+        .defaultSize(width: 1320, height: 780)
         .commands {
             CommandGroup(replacing: .newItem) {
                 Button("New Show") { app.newShow() }
@@ -23,7 +27,9 @@ struct CrocusApp: App {
                 Divider()
                 Button("Previous Shows…") { app.showArchive = true }
                 Menu("Export") {
-                    Button("Copy as Spreadsheet Rows") { app.copySpreadsheet() }
+                    Button("Copy Running Order") { app.copyRunningOrder() }
+                    Button("Copy Detailed Notes") { app.copyDetailedNotes() }
+                    Divider()
                     Button("Export Markdown…") { app.exportMarkdown() }
                     Button("Export CSV…") { app.exportCSV() }
                 }
@@ -42,6 +48,7 @@ struct CrocusApp: App {
                 Button("Play Next Group") { app.playNextGroup() }
                 Divider()
                 Button("Fade to Talk / Music Up") { app.fadeToTalk() }
+                Button("Fade Out Song") { app.fadeOutSong() }
                 Button("Stop") { app.stop() }
             }
 

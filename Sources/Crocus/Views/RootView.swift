@@ -140,7 +140,9 @@ struct ShowHeaderView: View {
                     .foregroundStyle(Theme.textSecondary)
 
                     Menu {
-                        Button("Copy as Spreadsheet Rows") { app.copySpreadsheet() }
+                        Button("Copy Running Order") { app.copyRunningOrder() }
+                        Button("Copy Detailed Notes") { app.copyDetailedNotes() }
+                        Divider()
                         Button("Export Markdown…") { app.exportMarkdown() }
                         Button("Export CSV…") { app.exportCSV() }
                     } label: {

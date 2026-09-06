@@ -16,28 +16,64 @@ enum Exporter {
         return rows
     }
 
-    // MARK: - Spreadsheet
+    // MARK: - Station running order (clipboard)
 
-    static func tsv(_ show: Show) -> String { table(show, sep: "\t", quote: false) }
-    static func csv(_ show: Show) -> String { table(show, sep: ",", quote: true) }
+    /// One column, numbered in running order — "1 Bilders - Strange Nights".
+    /// No header row and no other columns: this gets pasted straight into the
+    /// station's sheet as a single column. A plain hyphen (not the en dash used
+    /// on screen) separates artist from title so the text stays ASCII.
+    static func runningOrder(_ show: Show) -> String {
+        flatTracks(show).enumerated().map { i, row in
+            let t = row.track
+            let name = t.artist.isEmpty ? t.title : "\(t.artist) - \(t.title)"
+            return "\(i + 1) \(name)"
+        }
+        .joined(separator: "\n")
+    }
 
-    private static func table(_ show: Show, sep: String, quote: Bool) -> String {
-        // Station spreadsheet only needs: date, theme, track #, artist, song.
+    // MARK: - CSV (file export — one row per track, still columnar)
+
+    static func csv(_ show: Show) -> String {
         let headers = ["Date", "Theme", "#", "Artist", "Song"]
         func cell(_ s: String) -> String {
-            guard quote else { return s.replacingOccurrences(of: "\t", with: " ") }
             if s.contains(",") || s.contains("\"") || s.contains("\n") {
                 return "\"" + s.replacingOccurrences(of: "\"", with: "\"\"") + "\""
             }
             return s
         }
-        var lines = [headers.joined(separator: sep)]
+        var lines = [headers.joined(separator: ",")]
         for (i, row) in flatTracks(show).enumerated() {
             let t = row.track
             let cols = [show.formattedDate, show.theme, "\(i + 1)", t.artist, t.title]
-            lines.append(cols.map(cell).joined(separator: sep))
+            lines.append(cols.map(cell).joined(separator: ","))
         }
         return lines.joined(separator: "\n")
+    }
+
+    // MARK: - Detailed notes (raw material for writing the show up)
+
+    /// The whole episode as plain text, grouped the way it was broadcast:
+    /// identity at the top, then each group's songs with year and the host's
+    /// note. Track numbers run continuously across the show so they line up
+    /// with `runningOrder`. Plain text so it pastes cleanly anywhere.
+    static func detailedNotes(_ show: Show) -> String {
+        var out = show.displayTitle + "\n"
+        if !show.theme.isEmpty { out += "Theme: \(show.theme)\n" }
+        out += show.formattedDate + "\n"
+
+        var n = 0
+        for (gi, group) in show.groups.enumerated() where !group.tracks.isEmpty {
+            out += "\nGroup \(gi + 1)\n"
+            for t in group.tracks {
+                n += 1
+                var line = "  \(n). "
+                line += t.artist.isEmpty ? t.title : "\(t.artist) - \(t.title)"
+                if let y = t.year { line += " (\(y))" }
+                out += line + "\n"
+                if !t.note.isEmpty { out += "      Note: \(t.note)\n" }
+            }
+        }
+        return out
     }
 
     // MARK: - Markdown (a_certain_sound schema)

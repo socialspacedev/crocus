@@ -41,6 +41,11 @@ struct TransportView: View {
                         .disabled(engine.state == .stopped)
 
                     TransportButton(system: "forward.end.fill", hint: "N") { app.playNextGroup() }
+
+                    TransportButton(system: "arrow.down.right", hint: "O",
+                                    active: engine.isFadingOut) { app.fadeOutSong() }
+                        .disabled(engine.state != .playing || engine.isFadingOut || engine.isCrossfading)
+                        .help("Fade this song out early — crossfades into the next song in the group, or fades to silence and ends the group if it's the last one. Takes as long as the Fade out setting.  (O)")
                 }
 
                 Divider().frame(height: 32).overlay(Theme.hairline)
@@ -50,6 +55,7 @@ struct TransportView: View {
                         Image(systemName: "mic.fill").font(.system(size: 12))
                         Text(ducking ? "Music Up" : "Fade to Talk")
                             .font(.system(size: 12, weight: .medium))
+                            .fixedSize()
                     }
                     .foregroundStyle(ducking ? Theme.background : Theme.textPrimary)
                     .padding(.horizontal, 12)
@@ -62,12 +68,18 @@ struct TransportView: View {
 
                 Spacer()
 
-                HStack(alignment: .top, spacing: 16) {
+                HStack(alignment: .top, spacing: 14) {
                     matchToggle
                     ConsoleFader(label: "Crossfade",
                                  display: app.show.crossfadeDuration == 0 ? "off" : "\(Int(app.show.crossfadeDuration))s",
                                  value: $app.show.crossfadeDuration, range: 0...12,
-                                 help: "How long one song fades into the next inside a group. Applies from the next song.") {
+                                 help: "How long one song fades into the next inside a group, automatically. Applies from the next song.") {
+                        app.saveShow()
+                    }
+                    ConsoleFader(label: "Fade out",
+                                 display: "\(Int(app.show.fadeOutDuration))s",
+                                 value: fadeOutBinding, range: 2...20,
+                                 help: "How long the Fade Out button (O) takes to ride a song down — separate from Crossfade, so automatic transitions can stay quick while a deliberate fade takes its time. Applies to the next press, including one made mid-song.") {
                         app.saveShow()
                     }
                     ConsoleFader(label: "Duck time",
@@ -95,6 +107,13 @@ struct TransportView: View {
             .padding(.vertical, 14)
         }
         .background(Theme.surface)
+    }
+
+    // Fade Out length — pushed to the engine live, so a value dialled in
+    // mid-song applies to the press you're about to make.
+    private var fadeOutBinding: Binding<Double> {
+        Binding(get: { app.show.fadeOutDuration },
+                set: { app.setFadeOutDuration($0) })
     }
 
     private var bedLevelBinding: Binding<Double> {
@@ -149,6 +168,8 @@ struct TransportView: View {
 private struct TransportButton: View {
     let system: String
     let hint: String
+    /// Lit while the action it triggers is still running (a fade in progress).
+    var active: Bool = false
     let action: () -> Void
     @State private var hovering = false
 
@@ -161,9 +182,10 @@ private struct TransportButton: View {
                     .font(Theme.mono(8))
                     .foregroundStyle(Theme.textTertiary)
             }
-            .foregroundStyle(Theme.textPrimary)
+            .foregroundStyle(active ? Theme.accent : Theme.textPrimary)
             .frame(width: 40, height: 40)
-            .background(hovering ? Theme.surfaceHi : Color.clear, in: Circle())
+            .background(active ? Theme.accentSoft
+                               : (hovering ? Theme.surfaceHi : Color.clear), in: Circle())
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
@@ -216,6 +238,8 @@ private struct ConsoleFader: View {
             }
             fader
         }
+        // Wide enough that the longest label ("CROSSFADE", uppercase and tracked)
+        // sits on one line beside its value. Narrower and it wraps.
         .frame(width: 106)
         .help(help)
         .accessibilityElement()

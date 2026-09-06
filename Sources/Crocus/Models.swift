@@ -55,6 +55,11 @@ struct Show: Codable, Identifiable {
     var duckTime: TimeInterval = 8
     /// Level the music sits at under a voiceover (0–1). ~0.45 = clearly audible bed.
     var duckLevel: Double = 0.45
+    /// How long a manual Fade Out takes. Deliberately separate from
+    /// `crossfadeDuration`: automatic transitions inside a group want to be
+    /// quick, but deciding by hand to end a song wants a long, unhurried ride
+    /// down — so this is typically several times the crossfade.
+    var fadeOutDuration: TimeInterval = 10
     /// Match song levels across the show (loudness normalisation).
     var normalizeLoudness: Bool = true
     /// Master output gain. 1.0 is unity and the ceiling — the fader can only trim
@@ -118,7 +123,7 @@ extension SongGroup {
 extension Show {
     enum CodingKeys: String, CodingKey {
         case id, name, number, date, theme, groups, crossfadeDuration, duckTime, duckLevel
-        case normalizeLoudness, masterGain, backups
+        case fadeOutDuration, normalizeLoudness, masterGain, backups
     }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -131,6 +136,7 @@ extension Show {
         crossfadeDuration = try c.decodeIfPresent(TimeInterval.self, forKey: .crossfadeDuration) ?? 3
         duckTime = try c.decodeIfPresent(TimeInterval.self, forKey: .duckTime) ?? 8
         duckLevel = try c.decodeIfPresent(Double.self, forKey: .duckLevel) ?? 0.45
+        fadeOutDuration = try c.decodeIfPresent(TimeInterval.self, forKey: .fadeOutDuration) ?? 10
         normalizeLoudness = try c.decodeIfPresent(Bool.self, forKey: .normalizeLoudness) ?? true
         // Shows saved before there was an Output fader played at unity — keep them
         // there rather than quietly pulling an archived episode down.

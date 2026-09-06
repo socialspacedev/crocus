@@ -46,6 +46,7 @@ final class KeyboardMonitor {
         case "p": app.previousSong();  return nil
         case "n": app.playNextGroup(); return nil
         case "f": app.fadeToTalk();    return nil
+        case "o": app.fadeOutSong();   return nil
         case ".": app.stop();          return nil
         default: return event
         }
@@ -65,6 +66,7 @@ let crocusShortcuts: [Shortcut] = [
     .init(keys: "P  ·  ←", action: "Previous song (or restart)"),
     .init(keys: "N  ·  ⏎", action: "Play next group"),
     .init(keys: "F", action: "Fade to Talk"),
+    .init(keys: "O", action: "Fade out song early"),
     .init(keys: ".", action: "Stop"),
     .init(keys: "Esc", action: "Leave a text field / Stop"),
     .init(keys: "⌘N", action: "New show"),

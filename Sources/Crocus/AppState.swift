@@ -58,10 +58,11 @@ final class AppState: ObservableObject {
         Self.migrateLegacyData(into: base)
         load()
 
-        // Hold the display awake whenever a show is playing.
-        engine.$state
-            .sink { [weak self] st in self?.power.setKeepAwake(st == .playing) }
-            .store(in: &cancellables)
+        // Hold the display awake for the whole session, not just while audio is
+        // playing. Crocus stops the music at the end of every group by design, so
+        // playback-tied wakefulness would release the hold precisely when the host
+        // is back-announcing — talking, touching nothing, for a minute or two.
+        power.setKeepAwake(true)
 
         // When a group finishes on its own, cue the next group paused.
         engine.onGroupFinished = { [weak self] in self?.cueNextGroupPaused() }
@@ -143,6 +144,7 @@ final class AppState: ObservableObject {
                          crossfade: show.crossfadeDuration,
                          fadeToTalk: show.duckTime,
                          duckLevel: Float(show.duckLevel),
+                         fadeOut: show.fadeOutDuration,
                          gains: normGains(for: g.tracks),
                          master: Float(show.masterGain))
     }
@@ -156,6 +158,13 @@ final class AppState: ObservableObject {
     func setMasterGain(_ v: Double) {
         show.masterGain = v
         engine.setMasterGain(Float(v))
+    }
+
+    /// Live Fade Out length. Applies to the next press of Fade Out, so it can be
+    /// dialled in during the very song you're about to take out.
+    func setFadeOutDuration(_ v: Double) {
+        show.fadeOutDuration = v
+        engine.setFadeOutDuration(v)
     }
 
     func playGroup(_ group: SongGroup) {
@@ -186,6 +195,7 @@ final class AppState: ObservableObject {
         guard !g.tracks.isEmpty else { return }
         engine.cueGroup(g.tracks, crossfade: show.crossfadeDuration,
                         fadeToTalk: show.duckTime, duckLevel: Float(show.duckLevel),
+                        fadeOut: show.fadeOutDuration,
                         gains: normGains(for: g.tracks), master: Float(show.masterGain))
     }
 
@@ -203,7 +213,7 @@ final class AppState: ObservableObject {
         guard let track = resolveDraggedTrack(payload) else { return }
         engine.playGroup([track], crossfade: 0,
                          fadeToTalk: show.duckTime, duckLevel: Float(show.duckLevel),
-                         cueNext: false,
+                         fadeOut: show.fadeOutDuration, cueNext: false,
                          gains: normGains(for: [track]), master: Float(show.masterGain))
     }
 
@@ -273,7 +283,7 @@ final class AppState: ObservableObject {
         resignTextFocus()
         engine.playGroup([track], crossfade: 0,
                          fadeToTalk: show.duckTime, duckLevel: Float(show.duckLevel),
-                         cueNext: false,
+                         fadeOut: show.fadeOutDuration, cueNext: false,
                          gains: normGains(for: [track]), master: Float(show.masterGain))
     }
 
@@ -295,6 +305,7 @@ final class AppState: ObservableObject {
     func skipSong() { resignTextFocus(); engine.skipSong() }
     func previousSong() { resignTextFocus(); engine.previousSong() }
     func fadeToTalk() { resignTextFocus(); engine.startFadeToTalk() }
+    func fadeOutSong() { resignTextFocus(); engine.fadeOutCurrent() }
     func requestImport() { showImporter = true }
 
     /// Release any focused text field so single-key shortcuts work again.
@@ -796,10 +807,21 @@ final class AppState: ObservableObject {
 
     // MARK: - Export
 
-    func copySpreadsheet() {
+    /// The station's running order — one numbered column of "Artist - Title".
+    func copyRunningOrder() {
+        copyToClipboard(Exporter.runningOrder(show))
+    }
+
+    /// The full episode, grouped, with years and notes — the raw material for
+    /// writing up longer show notes.
+    func copyDetailedNotes() {
+        copyToClipboard(Exporter.detailedNotes(show))
+    }
+
+    private func copyToClipboard(_ text: String) {
         let pb = NSPasteboard.general
         pb.clearContents()
-        pb.setString(Exporter.tsv(show), forType: .string)
+        pb.setString(text, forType: .string)
     }
 
     func exportMarkdown() {

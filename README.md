@@ -22,6 +22,14 @@ music will stop, turning red and pulsing gently through the last ten seconds.
 - **Auto-stop** at the end of each group for back-announcing.
 - **Fade to Talk** — duck the music to a bed level and hold it there so you can
   talk over a song; press again to bring it back up. Tunable duck time + bed level.
+- **Fade Out** (`O`) — take a song out early when it's running long and you didn't
+  set an end marker. With another song left in the group the next song comes up
+  underneath; on the last song the music fades to silence and the group ends
+  normally, so the next group still cues up. The countdown shortens the moment you
+  press it. Its own **Fade out** fader (2–20s) sets the length, deliberately
+  separate from Crossfade: automatic transitions inside a group want to be quick,
+  but deciding by hand to end a song wants a long, unhurried ride down. Adjustable
+  live, so you can dial it in during the very song you're about to take out.
 - **Output fader with a built-in VU** — the level is metered inside the fader's
   own groove and rises until it meets the cap, so the control marks the ceiling.
   Green through the working range, amber and red just short of the cap for a hot
@@ -41,10 +49,19 @@ music will stop, turning red and pulsing gently through the last ten seconds.
   corrupts the original. FLAC/WAV can be edited in Crocus but not written back.
 - **Show identity** — editable name, number, date, and theme; saved automatically.
 - **Previous shows** archive — reopen any past episode.
-- **Export** — copy a spreadsheet (Date · Theme · # · Artist · Song) for the
-  station, or Markdown matching the website's `a_certain_sound` schema.
-- **Battery** readout with a low warning, and the display is **held awake** while
-  music plays (no screensaver / lock mid-show).
+- **Export** — four ways out of a show:
+  - *Copy Running Order* — one numbered column of `Artist - Title`, no header,
+    for pasting straight into the station's sheet.
+  - *Copy Detailed Notes* — the episode as plain text, grouped as broadcast,
+    with years and per-song notes. Raw material for writing up longer show notes.
+  - *Export Markdown…* — matches the website's `a_certain_sound` schema.
+  - *Export CSV…* — the columnar table (Date · Theme · # · Artist · Song).
+- **Battery** readout with a low warning, and the display is **held awake** for as
+  long as Crocus is open — no screensaver and no lock screen mid-show, including
+  while you're back-announcing with the music stopped. Held two ways: a power
+  assertion against display sleep, plus a user-activity declaration every 30s,
+  because the screen saver runs on its own idle timer and the assertion alone
+  doesn't stop it. Verify any time with `pmset -g assertions | grep Crocus`.
 
 ## Hotkeys
 
@@ -58,6 +75,7 @@ window is focused, except while editing a text field (press **Esc** to leave one
 | `P` · `←` | Previous song (or restart) |
 | `N` · `⏎` | Play next group |
 | `F` | Fade to Talk (toggle) |
+| `O` | Fade out song early |
 | `.` | Stop |
 | `Esc` | Leave a text field / Stop |
 | `⌘N` | New show |
