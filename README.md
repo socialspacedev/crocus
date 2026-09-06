@@ -105,6 +105,15 @@ Your library, rundown, previous shows, and settings are saved to:
 
 - Apple Music **streaming-catalog** tracks are DRM-protected and can't be
   crossfaded or trimmed by any app — use downloaded/owned files for the show.
+- **Long songs** are fine, with one thing to know. A song's trimmed audio is read
+  whole into memory so its samples can be scaled for loudness matching — about
+  600MB for half an hour of 44.1kHz stereo, released as soon as the song ends. The
+  read happens off the main thread and the *next* song is decoded ahead of time
+  while the current one plays, so neither the app nor a crossfade waits on it;
+  starting a long song shows "Loading…" for a second or two first. Trimming cuts
+  both the memory and the load time proportionally. The one rough edge on a very
+  long track is the waveform: at ~1.6s per screen pixel across half an hour, the
+  trim markers are coarse.
 - Built as a Swift Package that compiles into a native macOS app bundle.
 - *Crocus* is the app; *A Certain Sound* is the radio show it was built for. The
   show name survives in a few places on purpose — the default show name, the

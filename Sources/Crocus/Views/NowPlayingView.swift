@@ -114,6 +114,9 @@ struct NowPlayingView: View {
     }
 
     private var statusLabel: String {
+        // A long song takes a couple of seconds to read in. Say so, rather than
+        // sitting on "On air" with no sound coming out.
+        if engine.isLoading { return "Loading…" }
         if engine.isDucked || engine.isFadingToTalk { return "Talk · music ducked" }
         switch engine.state {
         case .playing: return engine.isCrossfading ? "Crossfading" : "On air"

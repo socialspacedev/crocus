@@ -57,6 +57,9 @@ final class AudioEngine: ObservableObject {
     @Published private(set) var isDucked = false
     /// Taking the current song out early, by hand (see `fadeOutCurrent`).
     @Published private(set) var isFadingOut = false
+    /// Reading a song in. Brief for a normal track, a couple of seconds for a
+    /// long one — the app stays responsive throughout either way.
+    @Published private(set) var isLoading = false
     /// Surfaced to the UI if a file fails to load mid-show, without crashing.
     @Published private(set) var lastError: String?
 
@@ -117,6 +120,17 @@ final class AudioEngine: ObservableObject {
     /// rather than jumping back up to full first.
     private var outgoingFromVolume: Float = 1
     private var fadeOutStartElapsed: TimeInterval = 0
+
+    /// The next song, decoded ahead of time, plus the queue index it belongs to.
+    private var preroll: DecodedSegment?
+    private var prerollIndex: Int?
+    private var prerollTask: Task<Void, Never>?
+    /// Bumped whenever the queue is replaced, so a decode that finishes against
+    /// the old queue can be recognised and thrown away.
+    private var queueGeneration = 0
+    /// Whether the segment currently being read should start playing when it
+    /// arrives — Space pressed mid-load flips this rather than being ignored.
+    private var pendingAutoPlay = false
 
     /// How long a manual Fade Out takes. Its own setting rather than the
     /// crossfade: quick automatic transitions and a long deliberate ride down
@@ -181,33 +195,28 @@ final class AudioEngine: ObservableObject {
     func playGroup(_ tracks: [Track], crossfade: TimeInterval,
                    fadeToTalk: TimeInterval, duckLevel: Float, fadeOut: TimeInterval,
                    cueNext: Bool = true, gains: [Float] = [], master: Float = 1) {
-        guard prepareGroup(tracks, crossfade: crossfade, fadeToTalk: fadeToTalk,
-                           duckLevel: duckLevel, fadeOut: fadeOut, cueNext: cueNext,
-                           gains: gains, master: master) else { return }
-        deckA.play()
-        state = .playing
-        startTimer()
+        beginGroup(tracks, crossfade: crossfade, fadeToTalk: fadeToTalk,
+                   duckLevel: duckLevel, fadeOut: fadeOut, cueNext: cueNext,
+                   gains: gains, master: master, startPlaying: true)
     }
 
     /// Load a group's first track but stay paused/cued — ready to play with Space.
     func cueGroup(_ tracks: [Track], crossfade: TimeInterval,
                   fadeToTalk: TimeInterval, duckLevel: Float, fadeOut: TimeInterval,
                   gains: [Float] = [], master: Float = 1) {
-        guard prepareGroup(tracks, crossfade: crossfade, fadeToTalk: fadeToTalk,
-                           duckLevel: duckLevel, fadeOut: fadeOut, cueNext: true,
-                           gains: gains, master: master) else { return }
-        state = .paused
-        startTimer()
+        beginGroup(tracks, crossfade: crossfade, fadeToTalk: fadeToTalk,
+                   duckLevel: duckLevel, fadeOut: fadeOut, cueNext: true,
+                   gains: gains, master: master, startPlaying: false)
     }
 
-    /// Shared setup for play/cue: load the first track on deck A (not yet playing).
-    private func prepareGroup(_ tracks: [Track], crossfade: TimeInterval,
-                              fadeToTalk: TimeInterval, duckLevel: Float,
-                              fadeOut: TimeInterval, cueNext: Bool,
-                              gains: [Float], master: Float) -> Bool {
+    /// Shared setup for play/cue. The first song is read in asynchronously, so
+    /// this returns immediately and the music starts when the audio lands.
+    private func beginGroup(_ tracks: [Track], crossfade: TimeInterval,
+                            fadeToTalk: TimeInterval, duckLevel: Float,
+                            fadeOut: TimeInterval, cueNext: Bool,
+                            gains: [Float], master: Float, startPlaying: Bool) {
         stop()
         queue = tracks
-        index = 0
         trackGains = gains
         setMasterGain(master)
         crossfadeDuration = max(0, crossfade)
@@ -215,27 +224,25 @@ final class AudioEngine: ObservableObject {
         manualFadeDuration = max(1, fadeOut)
         self.duckLevel = min(0.95, max(0.05, duckLevel))
         cueNextOnEnd = cueNext
-        guard !queue.isEmpty else { return false }
+        guard !queue.isEmpty else { return }
 
         ensureRunning()
         activeIsA = true
         deckA.volume = 1
         deckB.volume = 1
-
-        guard let dur = loadSegment(queue[0], on: deckA, gain: gainForIndex(0)) else {
-            stop()
-            return false
-        }
-        setActiveSegment(dur: dur, start: queue[0].trimStart)
-        currentSegmentDuration = dur
-        currentTrack = queue[0]
-        upNextTrack = queue.count > 1 ? queue[1] : nil
-        groupRemaining = computeGroupRemaining(currentElapsed: 0)
-        return true
+        loadActive(0, autoPlay: startPlaying)
     }
 
     /// Space-bar action. Resumes/pauses; starting a group is handled by AppState.
     func togglePlayPause() {
+        // Mid-load there is no audio to start yet, so record the intent instead
+        // of dropping the keypress: the segment goes straight on air (or stays
+        // cued) the moment it arrives.
+        if isLoading {
+            pendingAutoPlay.toggle()
+            state = pendingAutoPlay ? .playing : .paused
+            return
+        }
         switch state {
         case .playing:
             activeDeck.pause()
@@ -274,21 +281,7 @@ final class AudioEngine: ObservableObject {
     /// Load and play a specific index in the current group on the active deck.
     private func playIndex(_ i: Int) {
         guard i >= 0, i < queue.count else { return }
-        clearVolumeOverlays()
-        idleDeck.stop()
-        idleDeck.volume = 1
-        activeDeck.stop()
-        activeDeck.volume = 1
-        guard let dur = loadSegment(queue[i], on: activeDeck, gain: gainForIndex(i)) else { stop(); return }
-        setActiveSegment(dur: dur, start: queue[i].trimStart)
-        activeDeck.play()
-        index = i
-        state = .playing
-        currentTrack = queue[i]
-        upNextTrack = i + 1 < queue.count ? queue[i + 1] : nil
-        isCrossfading = false
-        crossfadeStartElapsed = nil
-        if timer == nil { startTimer() }
+        loadActive(i, autoPlay: true)
     }
 
     /// Toggle "fade to talk": duck the music down to a bed level and hold it there
@@ -357,6 +350,14 @@ final class AudioEngine: ObservableObject {
     }
 
     func stop() {
+        // Any decode still in flight belongs to a queue that no longer exists.
+        queueGeneration &+= 1
+        prerollTask?.cancel()
+        prerollTask = nil
+        preroll = nil
+        prerollIndex = nil
+        pendingAutoPlay = false
+        isLoading = false
         timer?.invalidate()
         timer = nil
         deckA.stop()
@@ -394,25 +395,54 @@ final class AudioEngine: ObservableObject {
         }
     }
 
-    /// Reconnect the deck to match the file's format, then schedule its trimmed
-    /// segment. Returns the segment's play duration, or nil on failure.
-    @discardableResult
-    private func loadSegment(_ track: Track, on deck: AVAudioPlayerNode, gain: Float = 1) -> TimeInterval? {
+    // MARK: - Decoding a segment
+    //
+    // Decoding is kept separate from scheduling. A trimmed segment is read whole
+    // into memory so its samples can be scaled for loudness matching (a boost
+    // above 1 isn't reachable through node volume) — and for a long track that
+    // read is slow: ~3s for a 29-minute mp3, which is also ~600MB. Done on the
+    // main actor it froze the entire app, so `decodeSegment` is nonisolated and
+    // runs off it.
+
+    /// A decoded, gain-scaled segment, ready to hand to a deck.
+    private struct DecodedSegment: @unchecked Sendable {
+        let buffer: AVAudioPCMBuffer
+        let format: AVAudioFormat
+        let duration: TimeInterval
+        /// What this actually is, so a decode that lands after the queue has
+        /// moved on can be spotted as stale and dropped.
+        let trackID: UUID
+        let trimStart: TimeInterval
+        let trimEnd: TimeInterval?
+    }
+
+    private enum DecodeOutcome {
+        case ok(DecodedSegment)
+        case failed(String)
+    }
+
+    /// Read a track's trimmed segment into memory and scale it for loudness
+    /// match. Pure file work, touching no engine state, so it is safe to run off
+    /// the main actor — which is the entire point of it being nonisolated.
+    private nonisolated static func decodeSegment(_ track: Track, gain: Float) -> DecodeOutcome {
+        let name = track.url.lastPathComponent
         do {
             let file = try AVAudioFile(forReading: track.url)
             let fmt = file.processingFormat
             let sr = fmt.sampleRate
-            guard sr > 0 else { return nil }
+            guard sr > 0 else { return .failed("Couldn't read \(name): no sample rate") }
             let total = file.length
             let startFrame = AVAudioFramePosition((max(0, track.trimStart) * sr).rounded())
             let endSec = track.trimEnd ?? (Double(total) / sr)
             let endFrame = min(total, AVAudioFramePosition((endSec * sr).rounded()))
             let count = AVAudioFrameCount(max(0, endFrame - startFrame))
-            guard count > 0, let buffer = AVAudioPCMBuffer(pcmFormat: fmt, frameCapacity: count)
-            else { return nil }
+            guard count > 0 else { return .failed("Nothing left to play in \(name) after its trim") }
+            guard let buffer = AVAudioPCMBuffer(pcmFormat: fmt, frameCapacity: count) else {
+                // Long songs are big — half an hour of 44.1kHz stereo is ~600MB.
+                // Say so; this used to fail silently and simply not play.
+                return .failed("Not enough memory to load \(name)")
+            }
 
-            // Read the trimmed segment into memory so we can scale its samples
-            // for loudness matching (a boost > 1 isn't possible via node volume).
             file.framePosition = startFrame
             try file.read(into: buffer, frameCount: count)
             if abs(gain - 1) > 0.001, let channels = buffer.floatChannelData {
@@ -423,16 +453,145 @@ final class AudioEngine: ObservableObject {
                     while i < frames { p[i] *= gain; i += 1 }
                 }
             }
-
-            // Direct deck → mixer (the mixer resamples any file format safely).
-            // Only ever reconnects a stopped deck.
-            engine.connect(deck, to: engine.mainMixerNode, format: fmt)
-            deck.scheduleBuffer(buffer, at: nil, options: [], completionHandler: nil)
-            return Double(buffer.frameLength) / sr
+            return .ok(DecodedSegment(buffer: buffer, format: fmt,
+                                      duration: Double(buffer.frameLength) / sr,
+                                      trackID: track.id,
+                                      trimStart: track.trimStart, trimEnd: track.trimEnd))
         } catch {
-            lastError = "Couldn't load \(track.url.lastPathComponent): \(error.localizedDescription)"
-            return nil
+            return .failed("Couldn't load \(name): \(error.localizedDescription)")
         }
+    }
+
+    /// Hand a decoded segment to a deck. Direct deck → mixer (the mixer resamples
+    /// any file format safely); only ever reconnects a stopped deck.
+    private func schedule(_ seg: DecodedSegment, on deck: AVAudioPlayerNode) {
+        engine.connect(deck, to: engine.mainMixerNode, format: seg.format)
+        deck.scheduleBuffer(seg.buffer, at: nil, options: [], completionHandler: nil)
+    }
+
+    /// Decode right now, on the main actor. The fallback for the rare moments
+    /// audio is needed immediately and no pre-roll is ready — a skip or a manual
+    /// Fade Out taken seconds after the song began. Blocks; see `decodeSegment`.
+    private func decodeNow(_ i: Int) -> DecodedSegment? {
+        guard i >= 0, i < queue.count else { return nil }
+        switch AudioEngine.decodeSegment(queue[i], gain: gainForIndex(i)) {
+        case .ok(let seg): return seg
+        case .failed(let msg): lastError = msg; return nil
+        }
+    }
+
+    // MARK: - Pre-roll
+    //
+    // The next song is decoded as soon as the current one starts, so its audio is
+    // already in memory by the time the crossfade is due. Without this a long
+    // track's read happened *inside* the crossfade window and overran it, so the
+    // ramp was already complete when the app came back — a hard cut, not a fade.
+
+    /// Begin decoding queue[i] in the background, discarding any earlier pre-roll.
+    private func startPreroll(for i: Int) {
+        prerollTask?.cancel()
+        prerollTask = nil
+        preroll = nil
+        prerollIndex = nil
+        guard i >= 0, i < queue.count else { return }
+        let track = queue[i]
+        let gain = gainForIndex(i)
+        let generation = queueGeneration
+        prerollIndex = i
+        prerollTask = Task.detached(priority: .userInitiated) { [weak self] in
+            let outcome = AudioEngine.decodeSegment(track, gain: gain)
+            guard !Task.isCancelled, let self else { return }
+            await MainActor.run {
+                self.acceptPreroll(outcome, for: i, trackID: track.id, generation: generation)
+            }
+        }
+    }
+
+    private func acceptPreroll(_ outcome: DecodeOutcome, for i: Int,
+                               trackID: UUID, generation: Int) {
+        // Drop anything that finished after the queue moved on beneath it.
+        guard generation == queueGeneration, prerollIndex == i,
+              i < queue.count, queue[i].id == trackID else { return }
+        switch outcome {
+        case .ok(let seg): preroll = seg
+        case .failed(let msg): preroll = nil; lastError = msg
+        }
+    }
+
+    /// Claim the pre-rolled segment for `i`, if one is ready and still matches
+    /// what the queue says should play there.
+    private func takePreroll(for i: Int) -> DecodedSegment? {
+        guard let seg = preroll, prerollIndex == i, i < queue.count,
+              queue[i].id == seg.trackID,
+              queue[i].trimStart == seg.trimStart,
+              queue[i].trimEnd == seg.trimEnd else { return nil }
+        preroll = nil
+        prerollIndex = nil
+        return seg
+    }
+
+    // MARK: - Putting a song on the active deck
+
+    /// Load queue[i] onto the active deck without blocking: the app stays live
+    /// while the file is read, and playback begins when it lands. `autoPlay` says
+    /// whether it should go straight on air or sit cued.
+    private func loadActive(_ i: Int, autoPlay: Bool) {
+        guard i >= 0, i < queue.count else { stop(); return }
+        clearVolumeOverlays()
+        idleDeck.stop(); idleDeck.volume = 1
+        activeDeck.stop(); activeDeck.volume = 1
+        isCrossfading = false
+        crossfadeStartElapsed = nil
+
+        index = i
+        currentTrack = queue[i]
+        upNextTrack = i + 1 < queue.count ? queue[i + 1] : nil
+        currentElapsed = 0
+        pendingAutoPlay = autoPlay
+        state = autoPlay ? .playing : .paused
+
+        // Already decoded ahead of time? Then there is nothing to wait for.
+        if let seg = takePreroll(for: i) {
+            activate(seg, at: i)
+            return
+        }
+
+        isLoading = true
+        let track = queue[i]
+        let gain = gainForIndex(i)
+        let generation = queueGeneration
+        Task.detached(priority: .userInitiated) { [weak self] in
+            let outcome = AudioEngine.decodeSegment(track, gain: gain)
+            guard let self else { return }
+            await MainActor.run {
+                guard generation == self.queueGeneration, self.index == i,
+                      i < self.queue.count, self.queue[i].id == track.id else { return }
+                switch outcome {
+                case .ok(let seg):
+                    self.activate(seg, at: i)
+                case .failed(let msg):
+                    self.lastError = msg
+                    self.stop()
+                }
+            }
+        }
+    }
+
+    /// Put a decoded segment on air: schedule it, adopt its timings, start it if
+    /// the transport is meant to be running, and pre-roll whatever follows.
+    private func activate(_ seg: DecodedSegment, at i: Int) {
+        isLoading = false
+        schedule(seg, on: activeDeck)
+        setActiveSegment(dur: seg.duration, start: seg.trimStart)
+        currentSegmentDuration = seg.duration
+        groupRemaining = computeGroupRemaining(currentElapsed: 0)
+        if pendingAutoPlay {
+            ensureRunning()
+            activeDeck.play()
+            state = .playing
+        }
+        if timer == nil { startTimer() }
+        startPreroll(for: i + 1)
     }
 
     private func elapsed(_ deck: AVAudioPlayerNode) -> TimeInterval {
@@ -455,7 +614,9 @@ final class AudioEngine: ObservableObject {
 
     private func tick() {
         updateMeters()
-        guard state == .playing else { return }
+        // While a segment is still being read there are no timings to act on —
+        // and a zero-length segment would otherwise read as "already finished".
+        guard state == .playing, !isLoading else { return }
         let e = elapsed(activeDeck)
         currentElapsed = e
         playheadAbsolute = activeSegmentStart + e
@@ -492,10 +653,13 @@ final class AudioEngine: ObservableObject {
             let p = min(1, (e - fadeOutStartElapsed) / activeFadeDuration)
             activeDeck.volume = outgoingFromVolume * Float(cos(p * .pi / 2))
             if p >= 1 || remaining <= 0 { endOfGroup() }
+        } else if remaining <= 0 {
+            // Checked before the crossfade window, not after: if a crossfade
+            // couldn't start (see `beginCrossfade`), the song must still end
+            // rather than sit here retrying against a deck that has run dry.
+            if hasNext { hardAdvance() } else { endOfGroup() }
         } else if hasNext, crossfadeDuration > 0, remaining <= crossfadeDuration, !suppressCrossfade {
             beginCrossfade()
-        } else if remaining <= 0 {
-            if hasNext { hardAdvance() } else { endOfGroup() }
         }
     }
 
@@ -588,21 +752,11 @@ final class AudioEngine: ObservableObject {
         guard state != .stopped, let cur = currentTrack, cur.id == trackID, index < queue.count
         else { return }
         let wasPlaying = (state == .playing)
-        clearVolumeOverlays()
-        idleDeck.stop(); idleDeck.volume = 1
-        activeDeck.stop(); activeDeck.volume = 1
         var t = cur
         t.trimStart = max(0, trimStart)
         t.trimEnd = trimEnd
         queue[index] = t
-        guard let dur = loadSegment(t, on: activeDeck, gain: gainForIndex(index)) else { stop(); return }
-        setActiveSegment(dur: dur, start: t.trimStart)
-        currentSegmentDuration = dur
-        currentElapsed = 0
-        currentTrack = t
-        isCrossfading = false
-        crossfadeStartElapsed = nil
-        if wasPlaying { activeDeck.play() }
+        loadActive(index, autoPlay: wasPlaying)
     }
 
     /// Drop every ramp that was riding on top of the active deck's volume —
@@ -619,22 +773,33 @@ final class AudioEngine: ObservableObject {
 
     /// The automatic crossfade at the tail of a song: full volume, the show's
     /// crossfade length, starting now.
+    ///
+    /// Pre-roll only. If the next song somehow isn't decoded yet — a song shorter
+    /// than its own read time — this does nothing and `tick` simply tries again
+    /// next time round, so the crossfade starts late rather than the app hanging
+    /// on a disk read mid-show. If it never becomes ready the end-of-song check
+    /// picks it up and advances instead.
     private func beginCrossfade() {
-        _ = beginCrossfade(over: crossfadeDuration, from: 1, at: elapsed(activeDeck))
+        _ = beginCrossfade(over: crossfadeDuration, from: 1,
+                           at: elapsed(activeDeck), prerollOnly: true)
     }
 
     /// Bring the next song up under the current one. `from` is the volume the
     /// outgoing deck starts at, so an early fade triggered under a voiceover
     /// ramps down from the bed level instead of jumping to full first.
-    /// Returns false if the next song couldn't be loaded.
+    /// Returns false if the next song's audio wasn't available.
     @discardableResult
     private func beginCrossfade(over duration: TimeInterval, from: Float,
-                                at startElapsed: TimeInterval) -> Bool {
-        let next = queue[index + 1]
+                                at startElapsed: TimeInterval,
+                                prerollOnly: Bool = false) -> Bool {
+        let nextIndex = index + 1
+        guard nextIndex < queue.count else { return false }
+        guard let seg = takePreroll(for: nextIndex) ?? (prerollOnly ? nil : decodeNow(nextIndex))
+        else { return false }
         idleDeck.stop()
         idleDeck.volume = 0
-        guard let dur = loadSegment(next, on: idleDeck, gain: gainForIndex(index + 1)) else { return false }
-        idleSegmentDuration = dur
+        schedule(seg, on: idleDeck)
+        idleSegmentDuration = seg.duration
         idleDeck.play()
         isCrossfading = true
         activeFadeDuration = max(0.05, duration)
@@ -655,20 +820,24 @@ final class AudioEngine: ObservableObject {
         crossfadeStartElapsed = nil
         currentTrack = queue[index]
         upNextTrack = index + 1 < queue.count ? queue[index + 1] : nil
+        startPreroll(for: index + 1)
     }
 
     private func hardAdvance() {
         let nextIndex = index + 1
         guard nextIndex < queue.count else { stop(); return }
+        let wasPlaying = (state == .playing)
         clearVolumeOverlays()
         activeDeck.stop()
         activeDeck.volume = 1
-        guard let dur = loadSegment(queue[nextIndex], on: activeDeck, gain: gainForIndex(nextIndex)) else { stop(); return }
-        setActiveSegment(dur: dur, start: queue[nextIndex].trimStart)
-        activeDeck.play()
+        // Pre-rolled in all but the freak case; decode inline only if it isn't
+        // ready, where a gap of silence would be the worse of the two.
+        guard let seg = takePreroll(for: nextIndex) ?? decodeNow(nextIndex) else { stop(); return }
         index = nextIndex
         currentTrack = queue[index]
         upNextTrack = index + 1 < queue.count ? queue[index + 1] : nil
+        pendingAutoPlay = wasPlaying
+        activate(seg, at: index)
     }
 
     /// Time until the music stops, accounting for crossfade overlap.
