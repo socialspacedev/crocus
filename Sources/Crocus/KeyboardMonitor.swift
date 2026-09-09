@@ -12,7 +12,14 @@ final class KeyboardMonitor {
         self.app = app
         guard monitor == nil else { return }
         monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            self?.handle(event) ?? event
+            // Not `self?.handle(event) ?? event`. That reads as "consume it if
+            // handled", but optional chaining flattens the two levels of Optional
+            // into one — so handle's nil ("I took this key") is indistinguishable
+            // from "self went away", and the `??` hands the keystroke back to the
+            // responder chain. Nothing there handles a bare Space, so macOS rang
+            // its alert beep over the top of every song start.
+            guard let self else { return event }
+            return self.handle(event)
         }
     }
 
