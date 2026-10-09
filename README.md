@@ -105,9 +105,40 @@ Crocus is unbranded, so this is the first stop on a new installation.
 | **Station** | Appears in the website export's description line, e.g. "Otago Access Radio 105.4FM". Leave it empty and the station is left out of the sentence altogether. |
 | **Time zone** | The zone episode dates are stamped in for the website export. Defaults to this Mac's own. |
 | **Schema key / Tag** | For *Export Markdown…* only — the `_schema` value, the front-matter block holding the tracklist, and the tag added alongside `music`. Ignore these unless you publish episode pages to a static site. |
+| **Page template** | The whole shape of the Markdown export. *Edit Template…* opens it; *Reset to Default* puts it back. See below. |
 
 Stored in `~/Library/Application Support/Crocus/settings.json`, pretty-printed and
 sorted, so it can be hand-edited or kept in a dotfiles repo just as easily.
+
+### The page template
+
+Every site wants different front matter, so *Export Markdown…* renders a template
+you own rather than a shape baked into Crocus. It lives at
+`~/Library/Application Support/Crocus/export-template.md` and is created with a
+working default the first time you need it.
+
+The language is three rules, because YAML front matter is line-oriented:
+
+| | |
+|---|---|
+| `{{token}}` | replaced by its value |
+| `{{token\|yaml}}` | the same, quoted if YAML would need it |
+| `{{#tracks}}` … `{{/tracks}}` | the lines between are repeated once per song |
+| `{{! … }}` | a note to yourself; never reaches the output |
+
+Plus one rule that removes the need for conditionals: **a line whose placeholders
+all come out empty is dropped**. That's why `year: {{track.year}}` simply vanishes
+for a song with no year, the way hand-written front matter would.
+
+Available placeholders — the template file lists them in its own header too:
+
+- **Show** — `{{show.name}}` `{{show.number}}` `{{show.title}}` `{{show.theme}}`
+  `{{show.description}}` `{{show.date}}` `{{show.dateLong}}` `{{show.slug}}`
+  `{{show.trackCount}}` `{{show.playtime}}`
+- **From Settings** — `{{station}}` `{{schemaKey}}` `{{schemaTag}}`
+- **Per song**, inside `{{#tracks}}` — `{{track.n}}` `{{track.artist}}`
+  `{{track.title}}` `{{track.year}}` `{{track.note}}` `{{track.album}}`
+  `{{track.group}}`
 
 ## Data
 

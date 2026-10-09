@@ -86,32 +86,40 @@ enum Exporter {
         return out
     }
 
-    // MARK: - Markdown (static-site episode schema)
+    // MARK: - Markdown (a template the user owns — see ExportTemplate)
 
-    static func markdown(_ show: Show, _ id: ExportIdentity) -> String {
-        var out = "---\n"
-        out += "_schema: \(id.schemaKey)\n"
-        out += "title: \(yaml(show.name) ) (Episode \(show.number))\n"
-        out += "description: \(yaml(descriptionLine(show, id)))\n"
-        out += "date: \(isoDate(show.date, id.timeZone))\n"
-        out += "type: article\n"
-        out += "layout: article.liquid\n"
-        out += "tags:\n  - music\n  - \(id.schemaTag)\n"
-        out += "\(id.schemaKey):\n"
-        out += "  hero_image:\n"
-        out += "  hero_alt:\n"
-        out += "  hero_caption:\n"
-        out += "  oar_url:\n"
-        out += "  tracks:\n"
-        for row in flatTracks(show) {
+    /// Build the values a template can draw on, then render it. Everything
+    /// site-specific lives in `template`, not here.
+    static func markdown(_ show: Show, _ id: ExportIdentity,
+                         template: String = ExportTemplate.standard) -> String {
+        let values: [String: String] = [
+            "schemaKey": id.schemaKey,
+            "schemaTag": id.schemaTag,
+            "station": id.station,
+            "show.name": show.name,
+            "show.number": String(show.number),
+            "show.title": "\(show.name) (Episode \(show.number))",
+            "show.theme": show.theme,
+            "show.description": descriptionLine(show, id),
+            "show.date": isoDate(show.date, id.timeZone),
+            "show.dateLong": show.formattedDate,
+            "show.slug": slug(show),
+            "show.trackCount": String(show.trackCount),
+            "show.playtime": TimeFmt.clock(show.totalPlaytime),
+        ]
+        let tracks: [[String: String]] = flatTracks(show).enumerated().map { i, row in
             let t = row.track
-            out += "    - artist: \(yaml(t.artist))\n"
-            out += "      title: \(yaml(t.title))\n"
-            if let y = t.year { out += "      year: \(y)\n" }
-            if !t.note.isEmpty { out += "      note: \(yaml(t.note))\n" }
+            return [
+                "track.n": String(i + 1),
+                "track.artist": t.artist,
+                "track.title": t.title,
+                "track.year": t.year.map(String.init) ?? "",
+                "track.note": t.note,
+                "track.album": t.album,
+                "track.group": String(row.group),
+            ]
         }
-        out += "---\n"
-        return out
+        return ExportTemplate.render(template, values: values, tracks: tracks)
     }
 
     private static func descriptionLine(_ show: Show, _ id: ExportIdentity) -> String {
@@ -138,19 +146,6 @@ enum Exporter {
     }
 
     // MARK: - Helpers
-
-    /// YAML scalar with quoting only when needed.
-    private static func yaml(_ s: String) -> String {
-        if s.isEmpty { return "\"\"" }
-        let needsQuote = s.contains(where: { ":#{}[],&*!|>'\"%@`".contains($0) })
-            || s.first == " " || s.last == " "
-            || ["true", "false", "yes", "no", "null"].contains(s.lowercased())
-        if needsQuote {
-            return "\"" + s.replacingOccurrences(of: "\\", with: "\\\\")
-                            .replacingOccurrences(of: "\"", with: "\\\"") + "\""
-        }
-        return s
-    }
 
     private static func isoDate(_ date: Date, _ zone: TimeZone) -> String {
         let f = DateFormatter()

@@ -826,7 +826,8 @@ final class AppState: ObservableObject {
     }
 
     func exportMarkdown() {
-        save(text: Exporter.markdown(show, settings.exportIdentity),
+        save(text: Exporter.markdown(show, settings.exportIdentity,
+                                     template: settings.exportTemplate()),
              suggested: Exporter.slug(show) + ".md", type: "md")
     }
 

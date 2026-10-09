@@ -33,6 +33,7 @@ struct SettingsView: View {
                     field("Tag", text: $settings.schemaTag,
                           placeholder: "radio-show",
                           help: "Added to the post's tags alongside “music”.")
+                    templateRow
                 }
 
                 HStack(spacing: 6) {
@@ -80,6 +81,40 @@ struct SettingsView: View {
                 .foregroundStyle(Theme.textTertiary)
                 .fixedSize(horizontal: false, vertical: true)
         }
+    }
+
+    /// The export's whole shape is a file, not code — so the useful controls are
+    /// "open it" and "put it back", not a text box in here.
+    private var templateRow: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Page template")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(Theme.textSecondary)
+            Text("The front matter Export Markdown… writes. Rewrite it to match whatever your site expects — placeholders like {{show.title}} and a {{#tracks}} block are listed at the top of the file.")
+                .font(.system(size: 11))
+                .foregroundStyle(Theme.textTertiary)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: 8) {
+                Button("Edit Template…") { openTemplate() }
+                Button("Reset to Default") { confirmResetTemplate() }
+            }
+            .controlSize(.small)
+        }
+    }
+
+    private func openTemplate() {
+        _ = settings.exportTemplate()          // creates it if this is the first time
+        NSWorkspace.shared.open(settings.templateURL)
+    }
+
+    private func confirmResetTemplate() {
+        let a = NSAlert()
+        a.messageText = "Reset the page template?"
+        a.informativeText = "Your edits to export-template.md will be replaced with the one Crocus ships. This can't be undone."
+        a.addButton(withTitle: "Reset")
+        a.addButton(withTitle: "Cancel")
+        guard a.runModal() == .alertFirstButtonReturn else { return }
+        settings.resetExportTemplate()
     }
 
     private var timeZoneRow: some View {

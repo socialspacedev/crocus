@@ -29,14 +29,19 @@ final class AppSettings: ObservableObject {
     @Published var schemaKey: String = "radio_show"
     @Published var schemaTag: String = "radio-show"
 
+    private let baseDir: URL
     private let fileURL: URL
     private var cancellables: Set<AnyCancellable> = []
+
+    /// The Markdown export's shape, as a file you can rewrite. See `ExportTemplate`.
+    var templateURL: URL { baseDir.appendingPathComponent("export-template.md") }
 
     private init() {
         let base = FileManager.default
             .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Crocus", isDirectory: true)
         try? FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
+        baseDir = base
         fileURL = base.appendingPathComponent("settings.json")
         load()
 
@@ -60,6 +65,25 @@ final class AppSettings: ObservableObject {
     /// recognises — a hand-edited settings file shouldn't break exporting.
     var timeZone: TimeZone {
         TimeZone(identifier: timeZoneID) ?? .current
+    }
+
+    // MARK: - Export template
+
+    /// The Markdown export template, writing the built-in default to disk the
+    /// first time it's wanted — so there is always a real file to open and edit
+    /// rather than an invisible default to discover.
+    func exportTemplate() -> String {
+        if let s = try? String(contentsOf: templateURL, encoding: .utf8),
+           !s.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return s
+        }
+        resetExportTemplate()
+        return ExportTemplate.standard
+    }
+
+    /// Put the shipped template back, discarding any edits.
+    func resetExportTemplate() {
+        try? ExportTemplate.standard.write(to: templateURL, atomically: true, encoding: .utf8)
     }
 
     // MARK: - Persistence
