@@ -17,3 +17,6 @@ DerivedData/
 
 # Claude Code — shared project settings are tracked; local overrides are not
 .claude/settings.local.json
+
+# Release artefacts
+*.dmg

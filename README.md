@@ -14,6 +14,70 @@ music **stops** — your cue to talk. You build a **rundown** of groups for the
 episode, then trigger them one at a time. A big countdown shows exactly when the
 music will stop, turning red and pulsing gently through the last ten seconds.
 
+## Install
+
+Crocus is free, and there's no paid Apple Developer certificate behind it. That
+shapes the two ways in — and makes the first one genuinely the easier one.
+
+### Build it yourself — recommended
+
+```bash
+git clone https://github.com/socialspacedev/crocus.git && cd crocus && ./install.sh
+```
+
+That's it. The script checks for the Xcode Command Line Tools (a free Apple
+download — it tells you how to get them if they're missing), compiles, and
+installs to `/Applications`. A minute or two the first time, seconds after that.
+
+**Why this is the easy path, not the hard one:** macOS only quarantines software
+that arrives from a browser. An app compiled on your own Mac isn't quarantined, so
+it opens on a double-click with no warnings and no trip through System Settings.
+
+Requires macOS 14 (Sonoma) or newer.
+
+### Download the DMG instead
+
+Grab `Crocus-x.y.z.dmg` from
+[the latest release](https://github.com/socialspacedev/crocus/releases/latest) and
+drag Crocus to Applications.
+
+Because a download *is* quarantined and Crocus isn't notarised, macOS will refuse
+it the first time — "Apple could not verify Crocus is free of malware". To allow
+it, once:
+
+1. Try to open Crocus, and let it be refused
+2. Open **System Settings ▸ Privacy & Security**
+3. Scroll to the bottom and click **Open Anyway** next to Crocus
+4. Authenticate, then confirm
+
+It opens normally from then on. (Notarising it away would cost US$99/year, which
+a free tool for a handful of radio people doesn't warrant yet.)
+
+### Updating
+
+`git pull && ./install.sh` — your library, shows and settings live in Application
+Support and are untouched by reinstalling.
+
+## Development
+
+```bash
+./build.sh                 # fast debug build, then launch
+./build.sh release         # optimized build, then launch
+./build.sh release nolaunch
+./release.sh               # build + sign + package dist/Crocus-<version>.dmg
+```
+
+`release.sh` reads its signing setup from the environment, so it works with or
+without an Apple Developer account:
+
+```bash
+CROCUS_SIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)"
+CROCUS_NOTARY_PROFILE="crocus"   # from: xcrun notarytool store-credentials
+```
+
+With neither set it ad-hoc signs and tells you what that means for anyone
+downloading the result.
+
 ## Features
 
 - **Import** files or whole folders (mp3, m4a, wav, aiff, flac, …). Owned /
@@ -81,18 +145,6 @@ window is focused, except while editing a text field (press **Esc** to leave one
 | `Esc` | Leave a text field / Stop |
 | `⌘N` | New show |
 | `⌘O` | Import music |
-
-## Build & run
-
-Requires the Xcode Command Line Tools (Swift 6+). No full Xcode needed.
-
-```bash
-./build.sh release        # build the optimized .app and launch it
-./build.sh                # fast debug build and launch
-./build.sh release nolaunch
-```
-
-The app is assembled at `dist/Crocus.app` — drag it into `/Applications`.
 
 ## Settings (⌘,)
 

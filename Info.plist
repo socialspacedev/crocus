@@ -2,52 +2,54 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <key>CFBundleName</key>
-    <string>Crocus</string>
-    <key>CFBundleDisplayName</key>
-    <string>Crocus</string>
-    <key>CFBundleIdentifier</key>
-    <string>com.andrewlong.crocus</string>
-    <key>CFBundleExecutable</key>
-    <string>Crocus</string>
-    <key>CFBundlePackageType</key>
-    <string>APPL</string>
-    <key>CFBundleShortVersionString</key>
-    <string>0.1.0</string>
-    <key>CFBundleVersion</key>
-    <string>1</string>
-    <key>LSMinimumSystemVersion</key>
-    <string>14.0</string>
-    <key>LSApplicationCategoryType</key>
-    <string>public.app-category.music</string>
-    <key>NSHighResolutionCapable</key>
-    <true/>
-    <key>CFBundleIconFile</key>
-    <string>AppIcon</string>
-    <key>NSPrincipalClass</key>
-    <string>NSApplication</string>
-    <key>UTExportedTypeDeclarations</key>
-    <array>
-        <dict>
-            <key>UTTypeIdentifier</key>
-            <string>com.andrewlong.crocus.track</string>
-            <key>UTTypeDescription</key>
-            <string>Crocus Track</string>
-            <key>UTTypeConformsTo</key>
-            <array>
-                <string>public.data</string>
-            </array>
-        </dict>
-        <dict>
-            <key>UTTypeIdentifier</key>
-            <string>com.andrewlong.crocus.group</string>
-            <key>UTTypeDescription</key>
-            <string>Crocus Group</string>
-            <key>UTTypeConformsTo</key>
-            <array>
-                <string>public.data</string>
-            </array>
-        </dict>
-    </array>
+	<key>CFBundleDisplayName</key>
+	<string>Crocus</string>
+	<key>CFBundleExecutable</key>
+	<string>Crocus</string>
+	<key>CFBundleIconFile</key>
+	<string>AppIcon</string>
+	<key>CFBundleIdentifier</key>
+	<string>com.andrewlong.crocus</string>
+	<key>CFBundleName</key>
+	<string>Crocus</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>1.0.0</string>
+	<key>CFBundleVersion</key>
+	<string>1</string>
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.music</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>14.0</string>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Crocus serves a now-playing page to a phone or tablet on your own Wi-Fi, so a co-host can see what is playing and how long is left.</string>
+	<key>NSPrincipalClass</key>
+	<string>NSApplication</string>
+	<key>UTExportedTypeDeclarations</key>
+	<array>
+		<dict>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+			</array>
+			<key>UTTypeDescription</key>
+			<string>Crocus Track</string>
+			<key>UTTypeIdentifier</key>
+			<string>com.andrewlong.crocus.track</string>
+		</dict>
+		<dict>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+			</array>
+			<key>UTTypeDescription</key>
+			<string>Crocus Group</string>
+			<key>UTTypeIdentifier</key>
+			<string>com.andrewlong.crocus.group</string>
+		</dict>
+	</array>
 </dict>
 </plist>
