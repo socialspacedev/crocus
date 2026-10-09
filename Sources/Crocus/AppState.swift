@@ -33,6 +33,7 @@ final class AppState: ObservableObject {
     let engine = AudioEngine()
     let power = PowerManager()
     let viewer = WebServer()
+    let settings = AppSettings.shared
 
     private let supportDir: URL
     private let showURL: URL
@@ -825,7 +826,8 @@ final class AppState: ObservableObject {
     }
 
     func exportMarkdown() {
-        save(text: Exporter.markdown(show), suggested: Exporter.slug(show) + ".md", type: "md")
+        save(text: Exporter.markdown(show, settings.exportIdentity),
+             suggested: Exporter.slug(show) + ".md", type: "md")
     }
 
     func exportCSV() {
@@ -864,7 +866,9 @@ final class AppState: ObservableObject {
     func newShow() {
         let nextNumber = show.number + 1
         engine.stop()
-        show = Show(name: show.name, number: nextNumber, date: Date())
+        // Named from settings rather than carried forward, so correcting the show
+        // name in Settings takes effect on the next episode without an edit here.
+        show = Show(name: settings.showName, number: nextNumber, date: Date())
         selectedGroupID = nil
         saveShow()
     }
@@ -899,6 +903,10 @@ final class AppState: ObservableObject {
            let s = try? dec.decode(Show.self, from: data) {
             show = s
             selectedGroupID = s.groups.first?.id
+        } else {
+            // Fresh install: brand the very first show from settings rather than
+            // leaving the placeholder name sitting in the header.
+            show.name = AppSettings.shared.showName
         }
     }
 }

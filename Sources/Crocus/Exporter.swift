@@ -1,8 +1,18 @@
 import Foundation
 
-/// Turns a show into the formats Andrew needs: a spreadsheet-pasteable table for
-/// the radio station, and Markdown matching the minicannon `a_certain_sound`
-/// content schema for the website.
+/// Who's broadcasting and where the episode page lives — everything the Markdown
+/// export needs that isn't part of the show itself. A plain value, so an export
+/// can be produced and checked without live app state. See `AppSettings`.
+struct ExportIdentity {
+    var station: String
+    var timeZone: TimeZone
+    var schemaKey: String
+    var schemaTag: String
+}
+
+/// Turns a show into the formats a radio show needs: a one-column running order
+/// to paste into the station's sheet, plain-text notes for writing the episode
+/// up, and Markdown matching a static site's episode schema.
 enum Exporter {
 
     /// Every track across all groups, in running order.
@@ -76,18 +86,18 @@ enum Exporter {
         return out
     }
 
-    // MARK: - Markdown (a_certain_sound schema)
+    // MARK: - Markdown (static-site episode schema)
 
-    static func markdown(_ show: Show) -> String {
+    static func markdown(_ show: Show, _ id: ExportIdentity) -> String {
         var out = "---\n"
-        out += "_schema: a_certain_sound\n"
+        out += "_schema: \(id.schemaKey)\n"
         out += "title: \(yaml(show.name) ) (Episode \(show.number))\n"
-        out += "description: \(yaml(descriptionLine(show)))\n"
-        out += "date: \(isoDate(show.date))\n"
+        out += "description: \(yaml(descriptionLine(show, id)))\n"
+        out += "date: \(isoDate(show.date, id.timeZone))\n"
         out += "type: article\n"
         out += "layout: article.liquid\n"
-        out += "tags:\n  - music\n  - a-certain-sound\n"
-        out += "a_certain_sound:\n"
+        out += "tags:\n  - music\n  - \(id.schemaTag)\n"
+        out += "\(id.schemaKey):\n"
         out += "  hero_image:\n"
         out += "  hero_alt:\n"
         out += "  hero_caption:\n"
@@ -104,8 +114,13 @@ enum Exporter {
         return out
     }
 
-    private static func descriptionLine(_ show: Show) -> String {
-        var s = "Originally broadcast on \(show.formattedDate) on Otago Access Radio 105.4FM."
+    private static func descriptionLine(_ show: Show, _ id: ExportIdentity) -> String {
+        let station = id.station.trimmingCharacters(in: .whitespacesAndNewlines)
+        // No station configured — drop the clause rather than leave a dangling
+        // "on ." in the description of somebody else's show.
+        var s = "Originally broadcast on \(show.formattedDate)"
+        if !station.isEmpty { s += " on \(station)" }
+        s += "."
         if !show.theme.isEmpty { s = "Theme: \(show.theme). " + s }
         return s
     }
@@ -137,10 +152,10 @@ enum Exporter {
         return s
     }
 
-    private static func isoDate(_ date: Date) -> String {
+    private static func isoDate(_ date: Date, _ zone: TimeZone) -> String {
         let f = DateFormatter()
         f.locale = Locale(identifier: "en_US_POSIX")
-        f.timeZone = TimeZone(identifier: "Pacific/Auckland")
+        f.timeZone = zone
         f.dateFormat = "yyyy-MM-dd'T'HH:mm:ssxxx"
         return f.string(from: date)
     }

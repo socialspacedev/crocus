@@ -18,6 +18,13 @@ struct CrocusApp: App {
                 .preferredColorScheme(.dark)
         }
         .defaultSize(width: 1320, height: 780)
+
+        // Gives Crocus ▸ Settings… on ⌘, for free.
+        Settings {
+            SettingsView()
+                .preferredColorScheme(.dark)
+        }
+
         .commands {
             CommandGroup(replacing: .newItem) {
                 Button("New Show") { app.newShow() }

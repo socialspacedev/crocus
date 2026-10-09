@@ -42,7 +42,9 @@ struct SongGroup: Identifiable, Codable, Hashable {
 /// One episode's plan: identity plus the ordered list of groups (the rundown).
 struct Show: Codable, Identifiable {
     var id = UUID()
-    var name: String = "A Certain Sound"
+    /// Neutral out of the box; `AppState` brands a fresh install from
+    /// `AppSettings.showName`, and new shows take their name from there.
+    var name: String = "My Radio Show"
     var number: Int = 1
     var date: Date = Date()
     /// Episode theme, e.g. "Instrumentals", "Punk", "Covers".
@@ -128,7 +130,7 @@ extension Show {
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
-        name = try c.decodeIfPresent(String.self, forKey: .name) ?? "A Certain Sound"
+        name = try c.decodeIfPresent(String.self, forKey: .name) ?? "My Radio Show"
         number = try c.decodeIfPresent(Int.self, forKey: .number) ?? 1
         date = try c.decodeIfPresent(Date.self, forKey: .date) ?? Date()
         theme = try c.decodeIfPresent(String.self, forKey: .theme) ?? ""
