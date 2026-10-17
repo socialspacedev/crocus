@@ -229,3 +229,7 @@ Your library, rundown, previous shows, and settings are saved to:
 - Consolidate any pre-managed-library originals into `~/Music/Crocus/Media`.
 - Optionally write tags back to **FLAC/WAV** too (needs an external tool such as
   `exiftool`, so left out for now).
+
+## Licence
+
+MIT © 2026 Andrew Long. See [LICENSE](LICENSE).

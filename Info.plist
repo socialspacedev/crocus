@@ -24,6 +24,8 @@
 	<string>14.0</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
+	<key>NSHumanReadableCopyright</key>
+	<string>Copyright © 2026 Andrew Long. MIT License.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Crocus serves a now-playing page to a phone or tablet on your own Wi-Fi, so a co-host can see what is playing and how long is left.</string>
 	<key>NSPrincipalClass</key>
