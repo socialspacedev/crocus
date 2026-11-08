@@ -46,9 +46,20 @@ struct RundownView: View {
                         .padding(.bottom, 16)
                     }
                     // Follow playback: keep the current/next group in view as the
-                    // show advances (and when you select a group by hand).
-                    .onChange(of: app.selectedGroupID) { _, newID in
+                    // show advances. Not on a click — a card you just clicked is
+                    // already in view, and sliding it to the centre moved whatever
+                    // you were reaching for next out from under the pointer.
+                    .onChange(of: app.playingGroupID) { _, newID in
                         guard let id = newID else { return }
+                        withAnimation(.easeInOut(duration: 0.35)) {
+                            proxy.scrollTo(id, anchor: .center)
+                        }
+                    }
+                    // "+ Group" lands a new, selected group at the bottom; bring
+                    // it into view. (Loading a show selects its first group.)
+                    .onChange(of: app.show.groups.count) { old, new in
+                        guard new == old + 1, let id = app.show.groups.last?.id,
+                              app.selectedGroupID == id else { return }
                         withAnimation(.easeInOut(duration: 0.35)) {
                             proxy.scrollTo(id, anchor: .center)
                         }
@@ -125,7 +136,7 @@ private struct GroupCard: View {
     @State private var pulse = false
 
     private var isSelected: Bool { app.selectedGroupID == group.id }
-    private var isPlayingThis: Bool { engine.state != .stopped && isSelected }
+    private var isPlayingThis: Bool { app.isOnAir(group.id) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -157,6 +168,7 @@ private struct GroupCard: View {
 
                 Menu {
                     Button("Delete Group", role: .destructive) { app.deleteGroup(group) }
+                        .disabled(isPlayingThis)
                 } label: {
                     Image(systemName: "ellipsis")
                         .font(.system(size: 13, weight: .semibold))
@@ -179,7 +191,8 @@ private struct GroupCard: View {
                 VStack(spacing: 0) {
                     ForEach(Array(group.tracks.enumerated()), id: \.element.id) { idx, track in
                         TrackRow(group: group, track: track, position: idx + 1,
-                                 isCurrent: isPlayingThis && engine.currentTrack?.id == track.id)
+                                 isCurrent: isPlayingThis && engine.currentTrack?.id == track.id,
+                                 isLocked: app.isLocked(groupID: group.id, trackID: track.id))
                             .id(track.id)
                         if idx < group.tracks.count - 1 {
                             Divider().overlay(Theme.hairline).padding(.leading, 12)
@@ -228,6 +241,8 @@ private struct TrackRow: View {
     let track: Track
     let position: Int
     let isCurrent: Bool
+    /// On air (or coming up in a crossfade), so it can't be removed.
+    let isLocked: Bool
     @State private var showNote = false
 
     private var isFocused: Bool {
@@ -286,13 +301,22 @@ private struct TrackRow: View {
                 Image(systemName: "xmark")
                     .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(Theme.textTertiary)
+                    .opacity(isLocked ? 0.3 : 1)
             }
             .buttonStyle(.plain)
-            .help("Remove from group")
+            .disabled(isLocked)
+            .help(isLocked ? "On air — can't be removed while it plays" : "Remove from group")
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .background(isCurrent ? Theme.accentSoft : (isFocused ? Theme.surfaceHi.opacity(0.6) : Color.clear))
+        // Selected: a lift plus an edge bar. Was surfaceHi at 60% — but selecting a
+        // song also selects its group, whose card is surfaceHi, so it never showed.
+        .background(isCurrent ? Theme.accentSoft : (isFocused ? Theme.textPrimary.opacity(0.06) : Color.clear))
+        .overlay(alignment: .leading) {
+            if isFocused && !isCurrent {
+                Rectangle().fill(Theme.accent.opacity(0.7)).frame(width: 2)
+            }
+        }
         .contentShape(Rectangle())
         .onTapGesture {
             app.resignTextFocus()

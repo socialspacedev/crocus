@@ -121,10 +121,15 @@ final class AudioEngine: ObservableObject {
     private var outgoingFromVolume: Float = 1
     private var fadeOutStartElapsed: TimeInterval = 0
 
-    /// The next song, decoded ahead of time, plus the queue index it belongs to.
+    /// The next song, decoded ahead of time, plus the track (and trim) it was
+    /// decoded from. Matched by track rather than queue index, because the group
+    /// can be edited while it plays and the index of what's next moves with it.
     private var preroll: DecodedSegment?
-    private var prerollIndex: Int?
+    private var prerollFor: Track?
     private var prerollTask: Task<Void, Never>?
+    /// A group edit that arrived mid-crossfade, held until the crossfade lands
+    /// (see `updateQueue`).
+    private var pendingQueue: (tracks: [Track], gains: [Float])?
     /// Bumped whenever the queue is replaced, so a decode that finishes against
     /// the old queue can be recognised and thrown away.
     private var queueGeneration = 0
@@ -284,6 +289,44 @@ final class AudioEngine: ObservableObject {
         loadActive(i, autoPlay: true)
     }
 
+    /// Take in edits to the group that's on air — songs added, removed or
+    /// reordered while it plays. The song playing now carries on untouched;
+    /// everything after it follows the new list, so a song added to the end of
+    /// the group gets played instead of the group stopping without it.
+    ///
+    /// Mid-crossfade two songs are sounding and the queue position is about to
+    /// step forward, so the edit is held for the few seconds until it lands.
+    func updateQueue(_ tracks: [Track], gains: [Float]) {
+        guard state != .stopped, !queue.isEmpty else { return }
+        if isCrossfading {
+            pendingQueue = (tracks, gains)
+            return
+        }
+        applyQueue(tracks, gains: gains)
+    }
+
+    private func applyQueue(_ tracks: [Track], gains: [Float]) {
+        // The song on air left the group (the rundown doesn't allow this, but
+        // be safe): keep playing what we have rather than guess at a position.
+        guard let cur = currentTrack,
+              let i = tracks.firstIndex(where: { $0.id == cur.id }) else { return }
+        queue = tracks
+        trackGains = gains
+        index = i
+        upNextTrack = i + 1 < queue.count ? queue[i + 1] : nil
+        if !isLoading { groupRemaining = computeGroupRemaining(currentElapsed: currentElapsed) }
+
+        // Re-roll only if what's next actually changed — a decode of a long
+        // song is too expensive to throw away on every edit. Mid-load, the
+        // load itself pre-rolls the right song when it lands.
+        guard !isLoading else { return }
+        let next = upNextTrack
+        let unchanged = next?.id == prerollFor?.id
+            && next?.trimStart == prerollFor?.trimStart
+            && next?.trimEnd == prerollFor?.trimEnd
+        if !unchanged { startPreroll(for: i + 1) }
+    }
+
     /// Toggle "fade to talk": duck the music down to a bed level and hold it there
     /// so you can talk over the song; press again to bring it back up. The duck
     /// time is clamped so it never runs past the end of the current song.
@@ -355,7 +398,8 @@ final class AudioEngine: ObservableObject {
         prerollTask?.cancel()
         prerollTask = nil
         preroll = nil
-        prerollIndex = nil
+        prerollFor = nil
+        pendingQueue = nil
         pendingAutoPlay = false
         isLoading = false
         timer?.invalidate()
@@ -492,26 +536,24 @@ final class AudioEngine: ObservableObject {
         prerollTask?.cancel()
         prerollTask = nil
         preroll = nil
-        prerollIndex = nil
+        prerollFor = nil
         guard i >= 0, i < queue.count else { return }
         let track = queue[i]
         let gain = gainForIndex(i)
         let generation = queueGeneration
-        prerollIndex = i
+        prerollFor = track
         prerollTask = Task.detached(priority: .userInitiated) { [weak self] in
             let outcome = AudioEngine.decodeSegment(track, gain: gain)
             guard !Task.isCancelled, let self else { return }
             await MainActor.run {
-                self.acceptPreroll(outcome, for: i, trackID: track.id, generation: generation)
+                self.acceptPreroll(outcome, trackID: track.id, generation: generation)
             }
         }
     }
 
-    private func acceptPreroll(_ outcome: DecodeOutcome, for i: Int,
-                               trackID: UUID, generation: Int) {
+    private func acceptPreroll(_ outcome: DecodeOutcome, trackID: UUID, generation: Int) {
         // Drop anything that finished after the queue moved on beneath it.
-        guard generation == queueGeneration, prerollIndex == i,
-              i < queue.count, queue[i].id == trackID else { return }
+        guard generation == queueGeneration, prerollFor?.id == trackID else { return }
         switch outcome {
         case .ok(let seg): preroll = seg
         case .failed(let msg): preroll = nil; lastError = msg
@@ -521,12 +563,12 @@ final class AudioEngine: ObservableObject {
     /// Claim the pre-rolled segment for `i`, if one is ready and still matches
     /// what the queue says should play there.
     private func takePreroll(for i: Int) -> DecodedSegment? {
-        guard let seg = preroll, prerollIndex == i, i < queue.count,
+        guard let seg = preroll, i >= 0, i < queue.count,
               queue[i].id == seg.trackID,
               queue[i].trimStart == seg.trimStart,
               queue[i].trimEnd == seg.trimEnd else { return nil }
         preroll = nil
-        prerollIndex = nil
+        prerollFor = nil
         return seg
     }
 
@@ -564,11 +606,13 @@ final class AudioEngine: ObservableObject {
             let outcome = AudioEngine.decodeSegment(track, gain: gain)
             guard let self else { return }
             await MainActor.run {
-                guard generation == self.queueGeneration, self.index == i,
-                      i < self.queue.count, self.queue[i].id == track.id else { return }
+                // Found by track, not index: the group may have been edited
+                // while this was reading, moving the song's position.
+                guard generation == self.queueGeneration, self.currentTrack?.id == track.id,
+                      let j = self.queue.firstIndex(where: { $0.id == track.id }) else { return }
                 switch outcome {
                 case .ok(let seg):
-                    self.activate(seg, at: i)
+                    self.activate(seg, at: j)
                 case .failed(let msg):
                     self.lastError = msg
                     self.stop()
@@ -650,9 +694,10 @@ final class AudioEngine: ObservableObject {
             // Last song taken out by hand: the same equal-power curve, with
             // nothing coming up underneath. The segment end was pulled forward
             // to meet it, so `remaining` lands on zero at the same moment.
+            // A song added to the group during the fade still gets its turn.
             let p = min(1, (e - fadeOutStartElapsed) / activeFadeDuration)
             activeDeck.volume = outgoingFromVolume * Float(cos(p * .pi / 2))
-            if p >= 1 || remaining <= 0 { endOfGroup() }
+            if p >= 1 || remaining <= 0 { if hasNext { hardAdvance() } else { endOfGroup() } }
         } else if remaining <= 0 {
             // Checked before the crossfade window, not after: if a crossfade
             // couldn't start (see `beginCrossfade`), the song must still end
@@ -821,6 +866,11 @@ final class AudioEngine: ObservableObject {
         currentTrack = queue[index]
         upNextTrack = index + 1 < queue.count ? queue[index + 1] : nil
         startPreroll(for: index + 1)
+        // An edit held back during the crossfade; re-rolls if it changed what's next.
+        if let pending = pendingQueue {
+            pendingQueue = nil
+            applyQueue(pending.tracks, gains: pending.gains)
+        }
     }
 
     private func hardAdvance() {

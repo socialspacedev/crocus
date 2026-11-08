@@ -16,6 +16,10 @@ final class AppState: ObservableObject {
     @Published var library: [Track] = []
     @Published var show = Show()
     @Published var selectedGroupID: SongGroup.ID?
+    /// The group the engine is playing or has cued — kept apart from the
+    /// selection, so clicking around the rundown on air can't lose track of it.
+    /// nil while a one-off (a dragged or backup song) is playing.
+    @Published private(set) var playingGroupID: SongGroup.ID?
     /// Toggled by the "Import Music…" menu command; the view presents the picker.
     @Published var showImporter = false
     /// Sheets.
@@ -82,6 +86,33 @@ final class AppState: ObservableObject {
             .throttle(for: .milliseconds(300), scheduler: RunLoop.main, latest: true)
             .sink { [weak self] _ in self?.pushViewerStatus() }
             .store(in: &cancellables)
+
+        // Edits to the group on air go straight to the engine, so a song added
+        // mid-group plays rather than being skipped. Debounced so a trim-marker
+        // drag doesn't re-roll the next song on every frame.
+        $show
+            .debounce(for: .milliseconds(150), scheduler: DispatchQueue.main)
+            .sink { [weak self] _ in self?.syncPlayingGroup() }
+            .store(in: &cancellables)
+    }
+
+    private func syncPlayingGroup() {
+        guard engine.state != .stopped, let id = playingGroupID,
+              let g = show.groups.first(where: { $0.id == id }) else { return }
+        engine.updateQueue(g.tracks, gains: normGains(for: g.tracks))
+    }
+
+    /// Is this the group on air (playing, paused or cued)?
+    func isOnAir(_ groupID: SongGroup.ID) -> Bool {
+        engine.state != .stopped && playingGroupID == groupID
+    }
+
+    /// Songs that can't leave their group right now: the one on air, and the one
+    /// coming up underneath it during a crossfade.
+    func isLocked(groupID: SongGroup.ID, trackID: Track.ID) -> Bool {
+        guard isOnAir(groupID) else { return false }
+        return trackID == engine.currentTrack?.id
+            || (engine.isCrossfading && trackID == engine.upNextTrack?.id)
     }
 
     // MARK: - Second-screen viewer
@@ -141,6 +172,7 @@ final class AppState: ObservableObject {
 
     func playSelectedGroup() {
         guard let g = selectedGroup, !g.tracks.isEmpty else { return }
+        playingGroupID = g.id
         engine.playGroup(g.tracks,
                          crossfade: show.crossfadeDuration,
                          fadeToTalk: show.duckTime,
@@ -185,8 +217,9 @@ final class AppState: ObservableObject {
     }
 
     /// After a group ends, load the next one paused/cued on its first track.
+    /// Follows on from the group that played, not whichever one was last clicked.
     func cueNextGroupPaused() {
-        guard let current = selectedGroupID,
+        guard let current = playingGroupID,
               let i = show.groups.firstIndex(where: { $0.id == current }) else { return }
         let next = i + 1
         guard next < show.groups.count else { return }   // last group: stay off air
@@ -194,6 +227,7 @@ final class AppState: ObservableObject {
         selectedGroupID = g.id
         focusedRef = nil
         guard !g.tracks.isEmpty else { return }
+        playingGroupID = g.id
         engine.cueGroup(g.tracks, crossfade: show.crossfadeDuration,
                         fadeToTalk: show.duckTime, duckLevel: Float(show.duckLevel),
                         fadeOut: show.fadeOutDuration,
@@ -212,6 +246,7 @@ final class AppState: ObservableObject {
     /// Play a single dragged song immediately (one-off — doesn't auto-cue next).
     func playSingle(_ payload: DragPayload) {
         guard let track = resolveDraggedTrack(payload) else { return }
+        playingGroupID = nil
         engine.playGroup([track], crossfade: 0,
                          fadeToTalk: show.duckTime, duckLevel: Float(show.duckLevel),
                          fadeOut: show.fadeOutDuration, cueNext: false,
@@ -282,6 +317,7 @@ final class AppState: ObservableObject {
     /// Fire a backup song immediately as a one-off (doesn't disturb the rundown).
     func playBackup(_ track: Track) {
         resignTextFocus()
+        playingGroupID = nil
         engine.playGroup([track], crossfade: 0,
                          fadeToTalk: show.duckTime, duckLevel: Float(show.duckLevel),
                          fadeOut: show.fadeOutDuration, cueNext: false,
@@ -643,6 +679,7 @@ final class AppState: ObservableObject {
     }
 
     func deleteGroup(_ group: SongGroup) {
+        guard !isOnAir(group.id) else { return }
         show.groups.removeAll { $0.id == group.id }
         if selectedGroupID == group.id { selectedGroupID = show.groups.first?.id }
         saveShow()
@@ -689,6 +726,8 @@ final class AppState: ObservableObject {
 
     func removeTrack(at offsets: IndexSet, fromGroup groupID: SongGroup.ID) {
         guard let i = show.groups.firstIndex(where: { $0.id == groupID }) else { return }
+        let ids = offsets.map { show.groups[i].tracks[$0].id }
+        guard !ids.contains(where: { isLocked(groupID: groupID, trackID: $0) }) else { return }
         show.groups[i].tracks.remove(atOffsets: offsets)
         saveShow()
     }
@@ -732,7 +771,7 @@ final class AppState: ObservableObject {
     /// The track whose waveform the upper panel should show: the playing one if
     /// any, else the user's focused selection.
     var waveformContext: (ref: TrackRef, track: Track)? {
-        if engine.state != .stopped, let cur = engine.currentTrack, let gid = selectedGroupID {
+        if engine.state != .stopped, let cur = engine.currentTrack, let gid = playingGroupID {
             let ref = TrackRef(groupID: gid, trackID: cur.id)
             // Prefer the editable stored track so trim edits show; fall back to
             // the engine's snapshot if it isn't in the group for some reason.
@@ -750,6 +789,8 @@ final class AppState: ObservableObject {
     func handleDrop(_ payload: DragPayload, intoGroup groupID: SongGroup.ID, at index: Int?) {
         var dragged: Track
         if let from = payload.fromGroupID {
+            // The song on air can be reordered within its group, never moved out.
+            if from != groupID, isLocked(groupID: from, trackID: payload.trackID) { return }
             guard let si = show.groups.firstIndex(where: { $0.id == from }),
                   let ti = show.groups[si].tracks.firstIndex(where: { $0.id == payload.trackID })
             else { return }
