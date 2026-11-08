@@ -94,6 +94,12 @@ downloading the result.
   separate from Crossfade: automatic transitions inside a group want to be quick,
   but deciding by hand to end a song wants a long, unhurried ride down. Adjustable
   live, so you can dial it in during the very song you're about to take out.
+- **Change a group while it plays**: add, remove or reorder the songs still to
+  come and the group follows the new list, so a song dropped in on the fly gets
+  its turn rather than the group stopping without it. The song on air can't be
+  removed or moved out of the group, and the group on air can't be deleted.
+  Clicking around the rundown mid-song never changes what's playing or which
+  group cues up next.
 - **Output fader with a built-in VU**: the level is metered inside the fader's
   own groove and rises until it meets the cap, so the control marks the ceiling.
   Green through the working range, amber and red just short of the cap for a hot
